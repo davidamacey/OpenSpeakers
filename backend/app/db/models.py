@@ -1,4 +1,4 @@
-"""SQLAlchemy ORM models for open-speakers."""
+"""SQLAlchemy ORM models for OpenSpeakers."""
 from __future__ import annotations
 
 import uuid

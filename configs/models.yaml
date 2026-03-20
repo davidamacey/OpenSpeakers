@@ -1,4 +1,4 @@
-# open-speakers model registry
+# OpenSpeakers model registry
 # Edit this file to add, disable, or override models.
 # Changes take effect on worker restart (models are loaded lazily).
 

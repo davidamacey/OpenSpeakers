@@ -1,4 +1,4 @@
-"""Structured exception types for open-speakers."""
+"""Structured exception types for OpenSpeakers."""
 from __future__ import annotations
 
 from fastapi import HTTPException

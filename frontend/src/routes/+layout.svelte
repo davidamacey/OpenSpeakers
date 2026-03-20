@@ -22,7 +22,7 @@
   <!-- Sidebar nav -->
   <nav class="w-56 flex-shrink-0 border-r border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 flex flex-col">
     <div class="p-4 border-b border-gray-200 dark:border-gray-700">
-      <h1 class="font-bold text-lg text-primary-600 dark:text-primary-400">open-speakers</h1>
+      <h1 class="font-bold text-lg text-primary-600 dark:text-primary-400">OpenSpeakers</h1>
       <p class="text-xs text-gray-400 mt-0.5">TTS &amp; Voice Cloning</p>
     </div>
     <ul class="flex-1 p-2 space-y-1">

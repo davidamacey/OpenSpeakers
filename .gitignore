@@ -54,3 +54,11 @@ Thumbs.db
 .coverage
 htmlcov/
 coverage.xml
+
+# Security — never commit keys or tokens
+*.pem
+*.key
+tokens/
+
+# Claude Code internal state
+.claude/

@@ -1,8 +1,8 @@
-# CLAUDE.md — open-speakers
+# CLAUDE.md — OpenSpeakers
 
 ## Project Overview
 
-open-speakers is a unified TTS and voice cloning application supporting multiple open-source
+OpenSpeakers is a unified TTS and voice cloning application supporting multiple open-source
 models (VibeVoice, Fish Speech S2, Qwen3 TTS, Kokoro, etc.) with hot-swap GPU management.
 
 See `PLAN.md` for the full implementation plan and model details.

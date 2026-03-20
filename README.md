@@ -1,4 +1,4 @@
-# open-speakers
+# OpenSpeakers
 
 Unified TTS and voice cloning application supporting multiple open-source models
 (VibeVoice, Fish Speech S2, Qwen3 TTS, Kokoro) with single-GPU hot-swap management.
@@ -49,7 +49,7 @@ open http://localhost:8080/docs
 ## Project Structure
 
 ```
-open-speakers/
+open_speakers/
 ├── backend/                   # FastAPI + Celery
 │   ├── app/
 │   │   ├── api/endpoints/     # REST API routes

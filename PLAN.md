@@ -1,8 +1,8 @@
-# open-speakers — Implementation Plan
+# OpenSpeakers — Implementation Plan
 
 ## Overview
 
-open-speakers is a unified TTS (text-to-speech) and voice cloning application that runs
+OpenSpeakers is a unified TTS (text-to-speech) and voice cloning application that runs
 multiple open-source models on a single GPU with hot-swap capability. It follows the same
 architecture as OpenTranscribe (Svelte frontend + FastAPI backend + Celery + Redis + PostgreSQL).
 
@@ -213,7 +213,7 @@ Request: generate with fish-speech-s2
 - [ ] API key authentication (optional, for multi-user)
 - [ ] MinIO for audio file storage (instead of local disk)
 - [ ] Flower monitoring dashboard
-- [ ] Docker Hub publish: `davidamacey/open-speakers`
+- [ ] Docker Hub publish: `davidamacey/OpenSpeakers`
 
 ---
 

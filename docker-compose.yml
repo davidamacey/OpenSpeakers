@@ -1,4 +1,4 @@
-# open-speakers Base Configuration
+# OpenSpeakers Base Configuration
 # This file contains common configuration for all environments
 #
 # Usage:
@@ -8,7 +8,7 @@
 
 services:
   postgres:
-    container_name: open-speakers-postgres
+    container_name: open_speakers-postgres
     image: postgres:17.5-alpine
     restart: always
     env_file: .env
@@ -29,7 +29,7 @@ services:
       retries: 5
 
   redis:
-    container_name: open-speakers-redis
+    container_name: open_speakers-redis
     image: redis:8.2.2-alpine3.22
     restart: always
     security_opt:
@@ -45,7 +45,7 @@ services:
       retries: 10
 
   backend:
-    container_name: open-speakers-backend
+    container_name: open_speakers-backend
     restart: always
     env_file: .env
     security_opt:
@@ -73,7 +73,7 @@ services:
         condition: service_healthy
 
   worker:
-    container_name: open-speakers-worker
+    container_name: open_speakers-worker
     restart: always
     env_file: .env
     security_opt:
@@ -112,7 +112,7 @@ services:
         condition: service_healthy
 
   frontend:
-    container_name: open-speakers-frontend
+    container_name: open_speakers-frontend
     restart: always
     security_opt:
       - no-new-privileges:true

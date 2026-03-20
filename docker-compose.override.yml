@@ -1,10 +1,10 @@
-# open-speakers Development Overrides
+# OpenSpeakers Development Overrides
 # Automatically loaded by `docker compose up` in development.
 # Mounts source code for hot reload on both backend and frontend.
 
 services:
   backend:
-    image: open-speakers-backend:latest
+    image: open_speakers-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -14,7 +14,7 @@ services:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8080 --reload
 
   worker:
-    image: open-speakers-backend:latest
+    image: open_speakers-backend:latest
     build:
       context: ./backend
       dockerfile: Dockerfile
@@ -25,7 +25,7 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
 
   frontend:
-    image: open-speakers-frontend:latest
+    image: open_speakers-frontend:latest
     build:
       context: ./frontend
       dockerfile: Dockerfile.dev

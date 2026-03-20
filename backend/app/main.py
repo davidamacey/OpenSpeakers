@@ -1,4 +1,4 @@
-"""open-speakers FastAPI application entry point.
+"""OpenSpeakers FastAPI application entry point.
 
 Production-quality setup:
   - Request ID tracking (X-Request-ID header)
@@ -42,7 +42,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting open-speakers backend (env=%s)", settings.ENVIRONMENT)
+    logger.info("Starting OpenSpeakers backend (env=%s)", settings.ENVIRONMENT)
 
     # Run DB migrations
     try:
@@ -55,15 +55,15 @@ async def lifespan(app: FastAPI):
     from pathlib import Path
     Path(settings.AUDIO_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
-    logger.info("open-speakers backend ready")
+    logger.info("OpenSpeakers backend ready")
     yield
-    logger.info("open-speakers backend shutting down")
+    logger.info("OpenSpeakers backend shutting down")
 
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
 app = FastAPI(
-    title="open-speakers",
+    title="OpenSpeakers",
     description="Unified TTS and voice cloning API — VibeVoice, Fish Speech, Qwen3, Kokoro",
     version="0.1.0",
     lifespan=lifespan,
