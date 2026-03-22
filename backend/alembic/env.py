@@ -10,11 +10,10 @@ from sqlalchemy import engine_from_config, pool
 # Add backend/ to path so app imports work
 sys.path.insert(0, os.path.dirname(os.path.dirname(__file__)))
 
-from app.core.config import settings
-from app.core.database import Base
-
 # Import all models so Alembic autogenerate can see them
 import app.db.models  # noqa: F401
+from app.core.config import settings
+from app.core.database import Base
 
 config = context.config
 config.set_main_option("sqlalchemy.url", settings.DATABASE_URL)

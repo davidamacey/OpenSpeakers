@@ -97,13 +97,11 @@ class VibeVoiceModel(TTSModelBase):
             attn_impl = "sdpa"
 
         try:
-            self._model = (
-                VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
-                    model_path,
-                    torch_dtype=load_dtype,
-                    device_map=device,
-                    attn_implementation=attn_impl,
-                )
+            self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                model_path,
+                torch_dtype=load_dtype,
+                device_map=device,
+                attn_implementation=attn_impl,
             )
         except Exception:
             if attn_impl == "flash_attention_2":
@@ -111,13 +109,11 @@ class VibeVoiceModel(TTSModelBase):
                     "flash_attention_2 failed, falling back to sdpa "
                     "(may have slightly lower audio quality)"
                 )
-                self._model = (
-                    VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
-                        model_path,
-                        torch_dtype=load_dtype,
-                        device_map=device,
-                        attn_implementation="sdpa",
-                    )
+                self._model = VibeVoiceStreamingForConditionalGenerationInference.from_pretrained(
+                    model_path,
+                    torch_dtype=load_dtype,
+                    device_map=device,
+                    attn_implementation="sdpa",
                 )
             else:
                 raise
@@ -213,7 +209,7 @@ class VibeVoiceModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, name: str) -> dict:
+    def clone_voice(self, audio_path: str, _name: str) -> dict:
         raise NotImplementedError(
             "VibeVoice 0.5B (Realtime) does not support voice cloning. "
             "Use VibeVoice 1.5B for zero-shot voice cloning."
@@ -232,9 +228,7 @@ class VibeVoiceModel(TTSModelBase):
             pt_path = VIBEVOICE_VOICES_DIR / f"{pt_name}.pt"
             if pt_path.exists():
                 logger.debug("Loading built-in voice %s from %s", voice_id, pt_path)
-                return torch.load(
-                    pt_path, map_location=self._device, weights_only=False
-                )
+                return torch.load(pt_path, map_location=self._device, weights_only=False)
             logger.warning("Built-in voice file not found: %s", pt_path)
 
         # Custom voice profile: voice_id is the path to a .pt file

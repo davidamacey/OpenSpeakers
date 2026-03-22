@@ -1,0 +1,76 @@
+# Pre-commit hooks configuration for OpenSpeakers
+# See https://pre-commit.com for more information
+# Matches standards from opencompanion and other open* projects
+
+repos:
+  # General pre-commit hooks
+  - repo: https://github.com/pre-commit/pre-commit-hooks
+    rev: v6.0.0
+    hooks:
+      - id: trailing-whitespace
+      - id: end-of-file-fixer
+      - id: check-yaml
+        args: [--unsafe]  # Allow custom YAML tags in docker-compose
+      - id: check-json
+      - id: check-added-large-files
+        args: [--maxkb=10240]  # 10MB max file size
+      - id: check-merge-conflict
+      - id: check-toml
+      - id: mixed-line-ending
+        args: [--fix=lf]
+      - id: check-executables-have-shebangs
+      - id: check-shebang-scripts-are-executable
+
+  # Python formatting and linting with Ruff (replaces Black, isort, flake8)
+  - repo: https://github.com/astral-sh/ruff-pre-commit
+    rev: v0.14.9
+    hooks:
+      - id: ruff-check
+        args: [--fix, --show-fixes]
+        files: ^backend/
+      - id: ruff-format
+        files: ^backend/
+
+  # Dockerfile linting (uses locally installed hadolint)
+  - repo: local
+    hooks:
+      - id: hadolint
+        name: Lint Dockerfiles
+        entry: hadolint
+        language: system
+        files: Dockerfile
+
+  # Secret detection
+  - repo: https://github.com/gitleaks/gitleaks
+    rev: v8.30.0
+    hooks:
+      - id: gitleaks
+        args: [--verbose, --no-banner]
+
+  # Python security linting
+  - repo: https://github.com/PyCQA/bandit
+    rev: 1.9.2
+    hooks:
+      - id: bandit
+        files: ^backend/
+        args: [-c, pyproject.toml, -r, backend/]
+        additional_dependencies: ["bandit[toml]"]
+
+  # Shell script linting
+  - repo: https://github.com/shellcheck-py/shellcheck-py
+    rev: v0.11.0.1
+    hooks:
+      - id: shellcheck
+        args: [--severity=warning]
+
+  # Commit message linting
+  - repo: https://github.com/compilerla/conventional-pre-commit
+    rev: v4.3.0
+    hooks:
+      - id: conventional-pre-commit
+        stages: [commit-msg]
+        args: [--force-scope]
+
+# Configuration for specific hooks
+default_stages: [pre-commit]
+fail_fast: false

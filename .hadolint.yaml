@@ -1,0 +1,9 @@
+# Hadolint configuration for OpenSpeakers
+# ML worker Dockerfiles intentionally use unpinned versions for torch/transformers
+# compatibility across rapidly-evolving model ecosystems.
+
+ignored:
+  - DL3007  # Using :latest — local base images (vibevoice-timestamps) have no version tags
+  - DL3008  # Pin versions in apt-get — impractical for ML dev images
+  - DL3013  # Pin versions in pip — ML deps change frequently
+  - DL3059  # Consecutive RUN instructions — kept separate for layer caching

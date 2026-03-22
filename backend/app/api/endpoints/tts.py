@@ -29,9 +29,7 @@ QUEUE_MAP: dict[str, str] = {
 
 
 @router.post("/generate", response_model=GenerateResponse, status_code=202)
-def create_tts_job(
-    request: GenerateRequest, db: Session = Depends(get_db)
-) -> GenerateResponse:
+def create_tts_job(request: GenerateRequest, db: Session = Depends(get_db)) -> GenerateResponse:
     """Submit a TTS generation request.
 
     Returns immediately with a job_id. Poll /tts/jobs/{job_id} for status.
@@ -41,9 +39,7 @@ def create_tts_job(
         model_id=request.model_id,
         text=request.text,
         voice_id=request.voice_id,
-        voice_profile_id=uuid.UUID(request.voice_id)
-        if _is_uuid(request.voice_id)
-        else None,
+        voice_profile_id=uuid.UUID(request.voice_id) if _is_uuid(request.voice_id) else None,
         parameters={
             "speed": request.speed,
             "pitch": request.pitch,
@@ -79,9 +75,7 @@ def get_job_audio(job_id: uuid.UUID, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.COMPLETE:
-        raise HTTPException(
-            status_code=409, detail=f"Job is {job.status.value}, not complete"
-        )
+        raise HTTPException(status_code=409, detail=f"Job is {job.status.value}, not complete")
     if not job.output_path or not Path(job.output_path).exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
 
@@ -109,10 +103,7 @@ def list_jobs(
 
     total = q.count()
     jobs = (
-        q.order_by(TTSJob.created_at.desc())
-        .offset((page - 1) * page_size)
-        .limit(page_size)
-        .all()
+        q.order_by(TTSJob.created_at.desc()).offset((page - 1) * page_size).limit(page_size).all()
     )
 
     return JobListResponse(

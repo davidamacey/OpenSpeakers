@@ -72,9 +72,7 @@ class VibeVoice1p5BModel(TTSModelBase):
         self._model.eval()
         self._model.set_ddpm_inference_steps(num_steps=20)
         self._loaded = True
-        logger.info(
-            "VibeVoice 1.5B loaded (%.1f GB VRAM estimate)", self.vram_gb_estimate
-        )
+        logger.info("VibeVoice 1.5B loaded (%.1f GB VRAM estimate)", self.vram_gb_estimate)
 
     def unload(self) -> None:
         import torch
@@ -152,7 +150,7 @@ class VibeVoice1p5BModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, name: str) -> dict:
+    def clone_voice(self, audio_path: str, _name: str) -> dict:
         """Store reference audio path for zero-shot cloning at generate time.
 
         The 1.5B model does zero-shot voice cloning by passing voice_samples
@@ -177,9 +175,7 @@ class VibeVoice1p5BModel(TTSModelBase):
 
         ref_path = Path(voice_id)
         if not ref_path.exists():
-            logger.warning(
-                "Voice reference %r not found, using default voice", voice_id
-            )
+            logger.warning("Voice reference %r not found, using default voice", voice_id)
             return None
 
         waveform, sr = torchaudio.load(str(ref_path))

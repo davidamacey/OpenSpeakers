@@ -22,8 +22,8 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from app.api.router import api_router
 from app.api.endpoints.system import router as system_router
+from app.api.router import api_router
 from app.api.websockets import ws_router
 from app.core.config import settings
 from app.middleware.request_id import RequestIDMiddleware
@@ -43,7 +43,7 @@ logger = logging.getLogger(__name__)
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(_app: FastAPI):
     logger.info("Starting OpenSpeakers backend (env=%s)", settings.ENVIRONMENT)
 
     # Run DB migrations
@@ -52,9 +52,7 @@ async def lifespan(app: FastAPI):
 
         run_migrations()
     except Exception:
-        logger.exception(
-            "Migration failed — the database may be unavailable. Continuing."
-        )
+        logger.exception("Migration failed — the database may be unavailable. Continuing.")
 
     # Ensure audio output directory exists
     from pathlib import Path
@@ -101,9 +99,7 @@ app.add_middleware(
 
 
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(
-    request: Request, exc: StarletteHTTPException
-) -> JSONResponse:
+async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -128,7 +124,7 @@ async def value_error_handler(request: Request, exc: ValueError) -> JSONResponse
 
 
 @app.exception_handler(Exception)
-async def generic_exception_handler(request: Request, exc: Exception) -> JSONResponse:
+async def generic_exception_handler(request: Request, _exc: Exception) -> JSONResponse:
     request_id = getattr(request.state, "request_id", "unknown")
     logger.exception(
         "Unhandled exception [request_id=%s] %s %s",

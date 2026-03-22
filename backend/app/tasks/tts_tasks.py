@@ -12,7 +12,7 @@ from __future__ import annotations
 import logging
 import time
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from celery import Task
@@ -93,11 +93,7 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         # ── Step 1: Resolve voice ─────────────────────────────────────────────
         voice_id = job.voice_id
         if job.voice_profile_id and not voice_id:
-            profile = (
-                db.query(VoiceProfile)
-                .filter(VoiceProfile.id == job.voice_profile_id)
-                .first()
-            )
+            profile = db.query(VoiceProfile).filter(VoiceProfile.id == job.voice_profile_id).first()
             if profile:
                 voice_id = profile.embedding_path or profile.reference_audio_path
 
@@ -170,7 +166,7 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         job.output_path = str(output_path)
         job.duration_seconds = result.duration_seconds
         job.processing_time_ms = processing_time_ms
-        job.completed_at = datetime.now(timezone.utc)
+        job.completed_at = datetime.now(UTC)
         db.commit()
 
         _pub(
@@ -198,16 +194,14 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         return {"job_id": job_id, "status": "complete", "output_path": str(output_path)}
 
     except Exception as exc:
-        logger.exception(
-            "Job %s failed (model=%s)", job_id, getattr(job, "model_id", "?")
-        )
+        logger.exception("Job %s failed (model=%s)", job_id, getattr(job, "model_id", "?"))
         _pub(job_id, {"type": "error", "message": str(exc)})
         try:
             job = db.query(TTSJob).filter(TTSJob.id == uuid.UUID(job_id)).first()
             if job:
                 job.status = JobStatus.FAILED
                 job.error_message = str(exc)
-                job.completed_at = datetime.now(timezone.utc)
+                job.completed_at = datetime.now(UTC)
                 db.commit()
         except Exception:
             logger.exception("Failed to update job status for %s", job_id)
@@ -234,9 +228,7 @@ def clone_voice(self: TTSTask, voice_profile_id: str) -> dict:
     db = _get_db()
     try:
         profile = (
-            db.query(VoiceProfile)
-            .filter(VoiceProfile.id == uuid.UUID(voice_profile_id))
-            .first()
+            db.query(VoiceProfile).filter(VoiceProfile.id == uuid.UUID(voice_profile_id)).first()
         )
         if not profile:
             raise ValueError(f"VoiceProfile {voice_profile_id} not found")

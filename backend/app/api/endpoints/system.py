@@ -68,9 +68,7 @@ def system_info() -> dict:
                     torch.cuda.get_device_properties(device_id).total_memory / 1e9, 1
                 ),
                 "vram_used_gb": round(torch.cuda.memory_allocated(device_id) / 1e9, 2),
-                "vram_reserved_gb": round(
-                    torch.cuda.memory_reserved(device_id) / 1e9, 2
-                ),
+                "vram_reserved_gb": round(torch.cuda.memory_reserved(device_id) / 1e9, 2),
             }
             gpu_info["nvidia_smi"] = _get_nvidia_smi_stats(device_id)
         else:

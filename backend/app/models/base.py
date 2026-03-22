@@ -77,7 +77,7 @@ class TTSModelBase(ABC):
         Must be called only while the model is loaded.
         """
 
-    def clone_voice(self, audio_path: str, name: str) -> dict:
+    def clone_voice(self, audio_path: str, _name: str) -> dict:
         """Create a voice profile from reference audio.
 
         Returns a dict of model-specific metadata to be stored alongside

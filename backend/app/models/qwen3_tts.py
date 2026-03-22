@@ -159,9 +159,7 @@ class Qwen3TTSModel(TTSModelBase):
             format="wav",
         )
 
-    def _generate_clone(
-        self, request: GenerateRequest, language: str
-    ) -> GenerateResult:
+    def _generate_clone(self, request: GenerateRequest, language: str) -> GenerateResult:
         """Generate speech using voice cloning from reference audio."""
         import soundfile as sf
         import torch
@@ -208,7 +206,7 @@ class Qwen3TTSModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, name: str) -> dict:
+    def clone_voice(self, audio_path: str, _name: str) -> dict:
         """Qwen3 TTS performs zero-shot cloning at inference time.
 
         We just store the reference audio path — the cloning happens
@@ -235,9 +233,7 @@ class Qwen3TTSModel(TTSModelBase):
             if name.lower() == voice_id.lower():
                 return name
 
-        logger.warning(
-            "Speaker %r not found, using default %s", voice_id, DEFAULT_SPEAKER
-        )
+        logger.warning("Speaker %r not found, using default %s", voice_id, DEFAULT_SPEAKER)
         return DEFAULT_SPEAKER
 
     @staticmethod

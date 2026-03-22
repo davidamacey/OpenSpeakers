@@ -32,23 +32,23 @@ MODEL_IDLE_TIMEOUT = int(os.environ.get("MODEL_IDLE_TIMEOUT", "60"))
 class ModelManager:
     """Singleton model manager for single-GPU hot-swap with idle unload."""
 
-    _instance: "ModelManager | None" = None
+    _instance: ModelManager | None = None
     _singleton_lock = threading.Lock()
 
     def __init__(self) -> None:
         self._load_lock = threading.Lock()
         self.current_model_id: str | None = None
-        self.current_model: "TTSModelBase | None" = None
+        self.current_model: TTSModelBase | None = None
         self._loading_model_id: str | None = None
         self._last_used: float = 0.0
         # Registry: model_id → class (not instance)
-        self._registry: dict[str, type["TTSModelBase"]] = {}
+        self._registry: dict[str, type[TTSModelBase]] = {}
         self._device: str = "cuda"
         self._register_defaults()
         self._start_idle_timer()
 
     @classmethod
-    def get_instance(cls) -> "ModelManager":
+    def get_instance(cls) -> ModelManager:
         if cls._instance is None:
             with cls._singleton_lock:
                 if cls._instance is None:
@@ -94,13 +94,13 @@ class ModelManager:
         except ImportError:
             logger.debug("Qwen3 TTS dependencies not installed")
 
-    def register(self, model_id: str, model_class: type["TTSModelBase"]) -> None:
+    def register(self, model_id: str, model_class: type[TTSModelBase]) -> None:
         self._registry[model_id] = model_class
         logger.info("Registered model: %s", model_id)
 
     # ── Model loading ──────────────────────────────────────────────────────────
 
-    def load_model(self, model_id: str, device: str | None = None) -> "TTSModelBase":
+    def load_model(self, model_id: str, device: str | None = None) -> TTSModelBase:
         """Load model_id, unloading the current model if different.
 
         Thread-safe via _load_lock (Celery uses concurrency=1 but we protect anyway).
@@ -116,9 +116,7 @@ class ModelManager:
                 return self.current_model
 
             if model_id not in self._registry:
-                raise ValueError(
-                    f"Unknown model: {model_id!r}. Available: {list(self._registry)}"
-                )
+                raise ValueError(f"Unknown model: {model_id!r}. Available: {list(self._registry)}")
 
             # Unload current model
             if self.current_model is not None:

@@ -1,0 +1,72 @@
+# OpenSpeakers Python Project Configuration
+
+[project]
+name = "open-speakers"
+version = "0.1.0"
+description = "Unified TTS and voice cloning with multiple open-source models and hot-swap GPU management"
+authors = [
+    {name = "OpenSpeakers Contributors"}
+]
+requires-python = ">=3.11"
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+exclude = [
+    ".git",
+    ".venv",
+    "venv",
+    "__pycache__",
+    "node_modules",
+    "model_cache",
+]
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle errors
+    "W",   # pycodestyle warnings
+    "F",   # pyflakes
+    "I",   # isort
+    "B",   # flake8-bugbear
+    "C4",  # flake8-comprehensions
+    "UP",  # pyupgrade
+    "ARG", # flake8-unused-arguments
+    "SIM", # flake8-simplify
+]
+ignore = [
+    "E501",  # Line too long - handled by ruff-format
+    "B008",  # Do not perform function calls in argument defaults (FastAPI Depends)
+    "W191",  # Indentation contains tabs
+    "B904",  # Allow raising exceptions without from e, for HTTPException
+]
+
+[tool.ruff.lint.isort]
+known-first-party = ["app"]
+
+[tool.bandit]
+exclude_dirs = ["tests", "venv", ".venv", "node_modules", "model_cache"]
+skips = [
+    "B101",  # assert_used - acceptable in non-production code
+    "B104",  # hardcoded_bind_all_interfaces - expected for Docker containers
+    "B110",  # try_except_pass - used for graceful error handling in cleanup
+    "B404",  # import_subprocess - needed for nvidia-smi GPU stats
+    "B603",  # subprocess_without_shell_equals_true - nvidia-smi with fixed args
+    "B607",  # start_process_with_partial_path - nvidia-smi is a known system binary
+    "B614",  # pytorch_load - expected for ML model loading
+    "B615",  # huggingface_unsafe_download - revision="main" used, strict pinning impractical for dev
+]
+
+[tool.bandit.assert_used]
+skips = ["*_test.py", "test_*.py"]
+
+[tool.pytest.ini_options]
+testpaths = ["backend/tests"]
+python_files = ["test_*.py", "*_test.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = "-v --tb=short --strict-markers"
+markers = [
+    "slow: marks tests as slow (deselect with '-m \"not slow\"')",
+    "integration: marks tests as integration tests",
+    "unit: marks tests as unit tests",
+]

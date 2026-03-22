@@ -24,9 +24,9 @@ RUN pip install --no-cache-dir \
 # ── Fish Speech from source ─────────────────────────────────────────────────
 # Install with --no-deps to skip pyaudio (not needed for inference, only mic input).
 # Then install the inference-time deps we actually need.
-RUN git clone --depth 1 https://github.com/fishaudio/fish-speech.git /opt/fish-speech && \
-    cd /opt/fish-speech && \
-    pip install --no-cache-dir --no-deps -e . && \
+RUN git clone --depth 1 https://github.com/fishaudio/fish-speech.git /opt/fish-speech
+WORKDIR /opt/fish-speech
+RUN pip install --no-cache-dir --no-deps -e . && \
     pip install --no-cache-dir \
     "natsort" \
     "loralib" \
@@ -44,6 +44,8 @@ RUN git clone --depth 1 https://github.com/fishaudio/fish-speech.git /opt/fish-s
     "randomname" \
     "argbind" \
     "pyrootutils"
+
+WORKDIR /app
 
 # ── Additional ML deps ──────────────────────────────────────────────────────
 RUN pip install --no-cache-dir \

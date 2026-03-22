@@ -35,9 +35,7 @@ DEFAULT_VOICE = "en-female-1"
 class KokoroModel(TTSModelBase):
     model_id = "kokoro"
     model_name = "Kokoro 82M"
-    description = (
-        "Lightweight StyleTTS2-derived model with 50+ preset voices — fast, < 1 GB VRAM"
-    )
+    description = "Lightweight StyleTTS2-derived model with 50+ preset voices — fast, < 1 GB VRAM"
     supports_voice_cloning = False
     supports_streaming = False
     supported_languages = ["en", "fr", "ja", "ko", "zh", "hi", "pt", "it", "es", "pl"]
@@ -81,9 +79,7 @@ class KokoroModel(TTSModelBase):
 
         samples = []
         sample_rate = 24000
-        for _, _, audio in self._pipeline(
-            request.text, voice=kokoro_voice, speed=request.speed
-        ):
+        for _, _, audio in self._pipeline(request.text, voice=kokoro_voice, speed=request.speed):
             samples.append(audio)
 
         audio_np = np.concatenate(samples) if samples else np.zeros(0, dtype=np.float32)

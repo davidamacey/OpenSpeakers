@@ -39,9 +39,7 @@ class FishSpeechModel(TTSModelBase):
 
     model_id = "fish-speech-s2"
     model_name = "Fish Audio S2-Pro"
-    description = (
-        "Fish Audio S2-Pro — zero-shot voice cloning, emotion tags, 80+ languages"
-    )
+    description = "Fish Audio S2-Pro — zero-shot voice cloning, emotion tags, 80+ languages"
     supports_voice_cloning = True
     supports_streaming = True
     supported_languages = ["en", "zh", "ja", "ko", "fr", "de", "ar", "es", "ru", "nl"]
@@ -185,7 +183,7 @@ class FishSpeechModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, name: str) -> dict:
+    def clone_voice(self, audio_path: str, _name: str) -> dict:
         """Fish Speech performs zero-shot cloning at inference time.
 
         No separate embedding extraction needed — the reference audio path

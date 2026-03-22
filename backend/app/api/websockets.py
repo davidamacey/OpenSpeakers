@@ -26,6 +26,7 @@ GPU stats event schema (JSON):
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import logging
 import uuid
@@ -148,12 +149,8 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
         logger.debug("WebSocket disconnected for job %s", job_id)
     except Exception:
         logger.exception("WebSocket error for job %s", job_id)
-        try:
-            await websocket.send_json(
-                {"type": "error", "message": "Internal server error"}
-            )
-        except Exception:
-            pass
+        with contextlib.suppress(Exception):
+            await websocket.send_json({"type": "error", "message": "Internal server error"})
     finally:
         if pubsub:
             await pubsub.unsubscribe(job_channel(job_id))
@@ -182,9 +179,7 @@ def _build_gpu_stats_payload() -> dict:
                     torch.cuda.get_device_properties(device_id).total_memory / 1e9, 1
                 ),
                 "vram_used_gb": round(torch.cuda.memory_allocated(device_id) / 1e9, 2),
-                "vram_reserved_gb": round(
-                    torch.cuda.memory_reserved(device_id) / 1e9, 2
-                ),
+                "vram_reserved_gb": round(torch.cuda.memory_reserved(device_id) / 1e9, 2),
                 "nvidia_smi": _get_nvidia_smi_stats(device_id),
             }
         else:

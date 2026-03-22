@@ -5,7 +5,7 @@
 #   - ffmpeg, libsndfile1
 # We layer on: celery, redis, sqlalchemy, and additional TTS model packages.
 
-FROM vibevoice-timestamps AS base
+FROM vibevoice-timestamps:latest AS base
 
 USER root
 WORKDIR /app
@@ -60,4 +60,6 @@ RUN pip install --no-cache-dir --no-deps "qwen-tts>=0.1.1" && \
 # Copy OpenSpeakers backend code (overrides /app from base image)
 COPY . .
 
-RUN mkdir -p /app/audio_output
+RUN mkdir -p /app/audio_output && chown -R 1000:1000 /app/audio_output
+
+USER 1000
