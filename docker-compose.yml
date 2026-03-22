@@ -111,6 +111,76 @@ services:
       redis:
         condition: service_healthy
 
+  worker-fish:
+    container_name: open_speakers-worker-fish
+    restart: always
+    env_file: .env
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info
+      -Q tts.fish-speech
+      --pool=threads
+      --concurrency=1
+      --hostname fish-worker@%h
+      -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./models}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d fish-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker-qwen3:
+    container_name: open_speakers-worker-qwen3
+    restart: always
+    env_file: .env
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info
+      -Q tts.qwen3
+      --pool=threads
+      --concurrency=1
+      --hostname qwen3-worker@%h
+      -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./models}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d qwen3-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     container_name: open_speakers-frontend
     restart: always

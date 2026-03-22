@@ -3,6 +3,7 @@ from __future__ import annotations
 import logging
 
 from celery import Celery
+from kombu import Queue
 
 from app.core.config import settings
 
@@ -25,9 +26,15 @@ celery_app.conf.update(
     result_expires=86400,
     # Worker settings
     worker_prefetch_multiplier=1,  # Don't prefetch — one task at a time (GPU)
-    task_acks_late=True,           # Ack after completion for reliability
+    task_acks_late=True,  # Ack after completion for reliability
     task_reject_on_worker_lost=True,
-    # Routes
+    # Queues
+    task_queues=[
+        Queue("tts"),
+        Queue("tts.fish-speech"),
+        Queue("tts.qwen3"),
+    ],
+    # Default routes (overridden at dispatch time for model-specific routing)
     task_routes={
         "app.tasks.tts_tasks.generate_tts": {"queue": "tts"},
         "app.tasks.tts_tasks.clone_voice": {"queue": "tts"},

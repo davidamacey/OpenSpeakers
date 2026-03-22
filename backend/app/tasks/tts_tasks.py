@@ -6,6 +6,7 @@ The Celery worker runs with --concurrency=1 to prevent GPU memory contention.
 Progress is published to Redis pub/sub (see app.api.websockets) so the
 FastAPI WebSocket endpoint can stream it to the browser in real time.
 """
+
 from __future__ import annotations
 
 import logging
@@ -28,6 +29,7 @@ logger = logging.getLogger(__name__)
 def _get_db():
     """Create a standalone DB session (not a FastAPI dependency)."""
     from app.core.database import SessionLocal
+
     return SessionLocal()
 
 
@@ -48,6 +50,7 @@ class TTSTask(Task):
     def manager(self):
         if self._manager is None:
             from app.models.manager import ModelManager
+
             self._manager = ModelManager.get_instance()
         return self._manager
 
@@ -59,8 +62,8 @@ class TTSTask(Task):
     queue="tts",
     max_retries=0,
     track_started=True,
-    soft_time_limit=600,   # 10 min soft limit
-    time_limit=660,        # 11 min hard limit
+    soft_time_limit=600,  # 10 min soft limit
+    time_limit=660,  # 11 min hard limit
 )
 def generate_tts(self: TTSTask, job_id: str) -> dict:
     """Generate TTS audio for the given job.
@@ -76,16 +79,25 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         job.status = JobStatus.RUNNING
         db.commit()
 
-        _pub(job_id, {"type": "status", "status": "running", "detail": "Job picked up by worker…"})
+        _pub(
+            job_id,
+            {
+                "type": "status",
+                "status": "running",
+                "detail": "Job picked up by worker…",
+            },
+        )
 
         t_start = time.monotonic()
 
         # ── Step 1: Resolve voice ─────────────────────────────────────────────
         voice_id = job.voice_id
         if job.voice_profile_id and not voice_id:
-            profile = db.query(VoiceProfile).filter(
-                VoiceProfile.id == job.voice_profile_id
-            ).first()
+            profile = (
+                db.query(VoiceProfile)
+                .filter(VoiceProfile.id == job.voice_profile_id)
+                .first()
+            )
             if profile:
                 voice_id = profile.embedding_path or profile.reference_audio_path
 
@@ -100,38 +112,50 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         )
 
         # ── Step 2: Load model ────────────────────────────────────────────────
-        _pub(job_id, {
-            "type": "progress",
-            "step": "model_loading",
-            "percent": 0,
-            "detail": f"Loading {job.model_id}…",
-        })
+        _pub(
+            job_id,
+            {
+                "type": "progress",
+                "step": "model_loading",
+                "percent": 0,
+                "detail": f"Loading {job.model_id}…",
+            },
+        )
 
         model = self.manager.load_model(job.model_id)
 
-        _pub(job_id, {
-            "type": "progress",
-            "step": "model_loading",
-            "percent": 100,
-            "detail": f"{job.model_id} loaded, starting synthesis…",
-        })
+        _pub(
+            job_id,
+            {
+                "type": "progress",
+                "step": "model_loading",
+                "percent": 100,
+                "detail": f"{job.model_id} loaded, starting synthesis…",
+            },
+        )
 
         # ── Step 3: Generate audio ────────────────────────────────────────────
-        _pub(job_id, {
-            "type": "progress",
-            "step": "generating",
-            "percent": 0,
-            "detail": f"Generating {len(job.text)} characters…",
-        })
+        _pub(
+            job_id,
+            {
+                "type": "progress",
+                "step": "generating",
+                "percent": 0,
+                "detail": f"Generating {len(job.text)} characters…",
+            },
+        )
 
         result = model.generate(request)
 
-        _pub(job_id, {
-            "type": "progress",
-            "step": "generating",
-            "percent": 100,
-            "detail": "Saving audio…",
-        })
+        _pub(
+            job_id,
+            {
+                "type": "progress",
+                "step": "generating",
+                "percent": 100,
+                "detail": "Saving audio…",
+            },
+        )
 
         # ── Step 4: Save audio ────────────────────────────────────────────────
         output_dir = Path(settings.AUDIO_OUTPUT_DIR)
@@ -149,22 +173,34 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         job.completed_at = datetime.now(timezone.utc)
         db.commit()
 
-        _pub(job_id, {
-            "type": "complete",
-            "job_id": job_id,
-            "audio_url": f"/api/tts/jobs/{job_id}/audio",
-            "duration": result.duration_seconds,
-            "processing_ms": processing_time_ms,
-        })
+        _pub(
+            job_id,
+            {
+                "type": "complete",
+                "job_id": job_id,
+                "audio_url": f"/api/tts/jobs/{job_id}/audio",
+                "duration": result.duration_seconds,
+                "processing_ms": processing_time_ms,
+            },
+        )
 
         logger.info(
             "Job %s complete: %.1fs audio in %dms (model=%s)",
-            job_id, result.duration_seconds, processing_time_ms, job.model_id,
+            job_id,
+            result.duration_seconds,
+            processing_time_ms,
+            job.model_id,
         )
+
+        # Unload model to free GPU VRAM for other workers sharing the GPU
+        self.manager.unload_all()
+
         return {"job_id": job_id, "status": "complete", "output_path": str(output_path)}
 
     except Exception as exc:
-        logger.exception("Job %s failed (model=%s)", job_id, getattr(job, "model_id", "?"))
+        logger.exception(
+            "Job %s failed (model=%s)", job_id, getattr(job, "model_id", "?")
+        )
         _pub(job_id, {"type": "error", "message": str(exc)})
         try:
             job = db.query(TTSJob).filter(TTSJob.id == uuid.UUID(job_id)).first()
@@ -197,9 +233,11 @@ def clone_voice(self: TTSTask, voice_profile_id: str) -> dict:
     """
     db = _get_db()
     try:
-        profile = db.query(VoiceProfile).filter(
-            VoiceProfile.id == uuid.UUID(voice_profile_id)
-        ).first()
+        profile = (
+            db.query(VoiceProfile)
+            .filter(VoiceProfile.id == uuid.UUID(voice_profile_id))
+            .first()
+        )
         if not profile:
             raise ValueError(f"VoiceProfile {voice_profile_id} not found")
 

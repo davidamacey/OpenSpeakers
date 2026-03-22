@@ -1,4 +1,5 @@
 """TTS generation endpoints."""
+
 from __future__ import annotations
 
 import uuid
@@ -8,17 +9,29 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from fastapi.responses import FileResponse
 from sqlalchemy.orm import Session
 
-from app.core.config import settings
 from app.core.database import get_db
 from app.db.models import JobStatus, TTSJob
-from app.schemas.tts import GenerateRequest, GenerateResponse, JobListResponse, JobResponse
+from app.schemas.tts import (
+    GenerateRequest,
+    GenerateResponse,
+    JobListResponse,
+    JobResponse,
+)
 from app.tasks.tts_tasks import generate_tts
 
 router = APIRouter(prefix="/tts", tags=["tts"])
 
+# Models that run on dedicated worker queues instead of the default "tts" queue
+QUEUE_MAP: dict[str, str] = {
+    "fish-speech-s2": "tts.fish-speech",
+    "qwen3-tts": "tts.qwen3",
+}
+
 
 @router.post("/generate", response_model=GenerateResponse, status_code=202)
-def create_tts_job(request: GenerateRequest, db: Session = Depends(get_db)) -> GenerateResponse:
+def create_tts_job(
+    request: GenerateRequest, db: Session = Depends(get_db)
+) -> GenerateResponse:
     """Submit a TTS generation request.
 
     Returns immediately with a job_id. Poll /tts/jobs/{job_id} for status.
@@ -28,7 +41,9 @@ def create_tts_job(request: GenerateRequest, db: Session = Depends(get_db)) -> G
         model_id=request.model_id,
         text=request.text,
         voice_id=request.voice_id,
-        voice_profile_id=uuid.UUID(request.voice_id) if _is_uuid(request.voice_id) else None,
+        voice_profile_id=uuid.UUID(request.voice_id)
+        if _is_uuid(request.voice_id)
+        else None,
         parameters={
             "speed": request.speed,
             "pitch": request.pitch,
@@ -41,8 +56,9 @@ def create_tts_job(request: GenerateRequest, db: Session = Depends(get_db)) -> G
     db.commit()
     db.refresh(job)
 
-    # Dispatch to Celery worker
-    generate_tts.apply_async(args=[str(job.id)], queue="tts")
+    # Dispatch to Celery worker (model-specific queue routing)
+    queue = QUEUE_MAP.get(request.model_id, "tts")
+    generate_tts.apply_async(args=[str(job.id)], queue=queue)
 
     return GenerateResponse(job_id=job.id, status=JobStatus.PENDING)
 
@@ -63,7 +79,9 @@ def get_job_audio(job_id: uuid.UUID, db: Session = Depends(get_db)):
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
     if job.status != JobStatus.COMPLETE:
-        raise HTTPException(status_code=409, detail=f"Job is {job.status.value}, not complete")
+        raise HTTPException(
+            status_code=409, detail=f"Job is {job.status.value}, not complete"
+        )
     if not job.output_path or not Path(job.output_path).exists():
         raise HTTPException(status_code=404, detail="Audio file not found")
 

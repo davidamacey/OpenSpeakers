@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from fastapi import APIRouter
 
-from app.api.endpoints import models, system, tts, voices
+from app.api.endpoints import models, tts, voices
 
 api_router = APIRouter(prefix="/api")
 

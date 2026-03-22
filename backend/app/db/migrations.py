@@ -2,6 +2,7 @@
 
 Pattern from OpenTranscribe: detect current schema state and upgrade if needed.
 """
+
 from __future__ import annotations
 
 import logging
@@ -9,7 +10,6 @@ import logging
 from alembic import command
 from alembic.config import Config
 from alembic.runtime.migration import MigrationContext
-from sqlalchemy import text
 
 from app.core.database import engine
 

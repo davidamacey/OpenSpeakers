@@ -1,0 +1,47 @@
+# Qwen3 TTS worker — separate container because qwen-tts needs transformers 5.x
+# (the main worker pins transformers 4.51.3 for VibeVoice compatibility)
+
+FROM python:3.12-slim
+
+WORKDIR /app
+
+# System dependencies
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    ffmpeg \
+    libsndfile1 \
+    libpq-dev \
+    git \
+    && rm -rf /var/lib/apt/lists/*
+
+# PyTorch with CUDA 12.8
+RUN pip install --no-cache-dir \
+    torch torchaudio --index-url https://download.pytorch.org/whl/cu128
+
+# Qwen3 TTS — install qwen-tts first (it pins its own transformers version)
+RUN pip install --no-cache-dir \
+    "qwen-tts" \
+    "accelerate" \
+    "vector_quantize_pytorch"
+
+# Audio processing
+RUN pip install --no-cache-dir \
+    soundfile \
+    numpy \
+    scipy \
+    librosa
+
+# OpenSpeakers backend deps (celery, DB, API framework)
+RUN pip install --no-cache-dir \
+    "celery>=5.4.0" \
+    "redis>=5.0.0" \
+    "sqlalchemy>=2.0.30" \
+    "alembic>=1.13.0" \
+    "psycopg2-binary>=2.9.9" \
+    "pydantic>=2.6.0" \
+    "pydantic-settings>=2.3.0" \
+    "python-dotenv>=1.0.0"
+
+# Application code
+COPY . .
+
+RUN mkdir -p /app/audio_output

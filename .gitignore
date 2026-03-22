@@ -26,9 +26,9 @@ frontend/.svelte-kit/
 frontend/dist/
 
 # Docker volumes (don't commit model weights or generated audio)
-models/
-model_cache/
-audio_output/
+/models/
+/model_cache/
+/audio_output/
 
 # Database
 *.sqlite

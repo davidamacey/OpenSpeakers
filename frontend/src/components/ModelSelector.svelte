@@ -1,11 +1,17 @@
 <script lang="ts">
   import type { ModelInfo } from '$api/models';
 
-  export let models: ModelInfo[] = [];
-  export let value: string = '';
-  export let disabled: boolean = false;
+  let {
+    models = [],
+    value = $bindable(''),
+    disabled = false
+  }: {
+    models?: ModelInfo[];
+    value?: string;
+    disabled?: boolean;
+  } = $props();
 
-  $: selected = models.find((m) => m.id === value);
+  let selected = $derived(models.find((m) => m.id === value));
 
   function statusClass(status: string): string {
     if (status === 'loaded') return 'badge-loaded';
@@ -47,7 +53,7 @@
         </div>
         <p class="text-gray-500 dark:text-gray-400 mt-0.5 truncate">{selected.description}</p>
         <div class="flex gap-2 mt-1 text-xs text-gray-400">
-          <span>Languages: {selected.supported_languages.slice(0, 6).join(', ')}{selected.supported_languages.length > 6 ? '…' : ''}</span>
+          <span>Languages: {selected.supported_languages.slice(0, 6).join(', ')}{selected.supported_languages.length > 6 ? '...' : ''}</span>
         </div>
       </div>
     </div>

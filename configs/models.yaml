@@ -9,16 +9,24 @@ models:
     hf_repo: microsoft/VibeVoice-Realtime-0.5B
     vram_gb: 4.5
     priority: 1  # lower = preferred default model
-    description: Microsoft VibeVoice real-time TTS with voice cloning
+    description: Microsoft VibeVoice real-time streaming TTS with 12 built-in voices
+
+  vibevoice-1.5b:
+    enabled: true
+    class: app.models.vibevoice_1p5b.VibeVoice1p5BModel
+    hf_repo: microsoft/VibeVoice-1.5B
+    vram_gb: 12.0
+    priority: 1
+    description: Microsoft VibeVoice 1.5B — zero-shot voice cloning, multi-speaker, long-form TTS
 
   fish-speech-s2:
     enabled: true
     class: app.models.fish_speech.FishSpeechModel
-    hf_repo: fishaudio/fish-speech-1.5
-    vram_gb: 5.0
+    hf_repo: fishaudio/s2-pro
+    vram_gb: 8.0
     priority: 2
-    description: Fish Audio Fish Speech S2 — zero-shot voice cloning
-    license: NC  # Non-commercial — ensure compliance before deployment
+    description: Fish Audio S2-Pro — zero-shot voice cloning, emotion tags, 80+ languages
+    license: FISH_AUDIO_RESEARCH  # See https://github.com/fishaudio/fish-speech/blob/main/LICENSE
 
   kokoro:
     enabled: true
@@ -29,7 +37,7 @@ models:
     description: Kokoro 82M — fast, lightweight, 50+ preset voices
 
   qwen3-tts:
-    enabled: false  # Enable in Phase 2
+    enabled: true  # Runs on dedicated worker-qwen3 container with transformers 5.x
     class: app.models.qwen3_tts.Qwen3TTSModel
     hf_repo: Qwen/Qwen3-TTS
     vram_gb: 10.0

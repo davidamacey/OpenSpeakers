@@ -1,4 +1,5 @@
 """Voice profile endpoints (cloned voices)."""
+
 from __future__ import annotations
 
 import shutil
@@ -11,10 +12,16 @@ from sqlalchemy.orm import Session
 from app.core.config import settings
 from app.core.database import get_db
 from app.db.models import VoiceProfile
-from app.schemas.voices import BuiltinVoice, VoiceListResponse, VoiceProfileCreate, VoiceProfileResponse
+from app.schemas.voices import BuiltinVoice, VoiceListResponse, VoiceProfileResponse
 from app.tasks.tts_tasks import clone_voice
 
 router = APIRouter(prefix="/voices", tags=["voices"])
+
+# Models that run on dedicated worker queues instead of the default "tts" queue
+QUEUE_MAP: dict[str, str] = {
+    "fish-speech-s2": "tts.fish-speech",
+    "qwen3-tts": "tts.qwen3",
+}
 
 # Max reference audio duration in seconds (enforced upstream by the task)
 MAX_REFERENCE_AUDIO_MB = 50
@@ -48,7 +55,12 @@ async def create_voice_profile(
     The voice embedding is generated asynchronously via a Celery task.
     """
     # Validate file type
-    if reference_audio.content_type not in ("audio/wav", "audio/mpeg", "audio/flac", "audio/x-flac"):
+    if reference_audio.content_type not in (
+        "audio/wav",
+        "audio/mpeg",
+        "audio/flac",
+        "audio/x-flac",
+    ):
         raise HTTPException(
             status_code=422,
             detail=f"Unsupported audio type: {reference_audio.content_type}. Use WAV, MP3, or FLAC.",
@@ -69,7 +81,10 @@ async def create_voice_profile(
     size_mb = ref_path.stat().st_size / (1024 * 1024)
     if size_mb > MAX_REFERENCE_AUDIO_MB:
         ref_path.unlink(missing_ok=True)
-        raise HTTPException(status_code=413, detail=f"Audio file too large: {size_mb:.1f} MB > {MAX_REFERENCE_AUDIO_MB} MB")
+        raise HTTPException(
+            status_code=413,
+            detail=f"Audio file too large: {size_mb:.1f} MB > {MAX_REFERENCE_AUDIO_MB} MB",
+        )
 
     # Create DB record
     profile = VoiceProfile(
@@ -82,8 +97,9 @@ async def create_voice_profile(
     db.commit()
     db.refresh(profile)
 
-    # Dispatch embedding generation task
-    clone_voice.apply_async(args=[str(profile.id)], queue="tts")
+    # Dispatch embedding generation task (model-specific queue routing)
+    queue = QUEUE_MAP.get(model_id, "tts")
+    clone_voice.apply_async(args=[str(profile.id)], queue=queue)
 
     return VoiceProfileResponse.model_validate(profile)
 
@@ -118,18 +134,36 @@ def list_builtin_voices(model_id: str) -> list[BuiltinVoice]:
 
     if model_id == "vibevoice":
         from app.models.vibevoice import BUILTIN_VOICES
+
         for voice_id, slug in BUILTIN_VOICES.items():
             parts = voice_id.split("-")
             lang = parts[0] if parts else "en"
             gender = "female" if "woman" in slug else "male"
-            builtin.append(BuiltinVoice(id=voice_id, name=voice_id, language=lang, gender=gender, model_id=model_id))
+            builtin.append(
+                BuiltinVoice(
+                    id=voice_id,
+                    name=voice_id,
+                    language=lang,
+                    gender=gender,
+                    model_id=model_id,
+                )
+            )
 
     elif model_id == "kokoro":
         from app.models.kokoro import KOKORO_VOICES
+
         for voice_id in KOKORO_VOICES:
             parts = voice_id.split("-")
             lang = parts[0] if parts else "en"
             gender = parts[1] if len(parts) > 1 else None
-            builtin.append(BuiltinVoice(id=voice_id, name=voice_id, language=lang, gender=gender, model_id=model_id))
+            builtin.append(
+                BuiltinVoice(
+                    id=voice_id,
+                    name=voice_id,
+                    language=lang,
+                    gender=gender,
+                    model_id=model_id,
+                )
+            )
 
     return builtin

@@ -15,6 +15,7 @@ Progress event schema (JSON):
   { "type": "error",     "message": "..." }
   { "type": "status",    "status": "running", "detail": "Loading VibeVoice 0.5B..." }
 """
+
 from __future__ import annotations
 
 import asyncio
@@ -55,6 +56,7 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
 
     # Check if job is already complete (no need to subscribe)
     from app.core.database import SessionLocal
+
     db = SessionLocal()
     try:
         job = db.query(TTSJob).filter(TTSJob.id == job_uuid).first()
@@ -65,20 +67,24 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
 
         if job.status == JobStatus.COMPLETE:
             audio_url = f"/api/tts/jobs/{job_id}/audio"
-            await websocket.send_json({
-                "type": "complete",
-                "job_id": job_id,
-                "audio_url": audio_url,
-                "duration": job.duration_seconds,
-            })
+            await websocket.send_json(
+                {
+                    "type": "complete",
+                    "job_id": job_id,
+                    "audio_url": audio_url,
+                    "duration": job.duration_seconds,
+                }
+            )
             await websocket.close()
             return
 
         if job.status == JobStatus.FAILED:
-            await websocket.send_json({
-                "type": "error",
-                "message": job.error_message or "Job failed",
-            })
+            await websocket.send_json(
+                {
+                    "type": "error",
+                    "message": job.error_message or "Job failed",
+                }
+            )
             await websocket.close()
             return
     finally:
@@ -93,11 +99,13 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
         await pubsub.subscribe(job_channel(job_id))
 
         # Send initial status so the user sees something immediately
-        await websocket.send_json({
-            "type": "status",
-            "status": "pending",
-            "detail": "Job queued, waiting for worker…",
-        })
+        await websocket.send_json(
+            {
+                "type": "status",
+                "status": "pending",
+                "detail": "Job queued, waiting for worker…",
+            }
+        )
 
         # Listen for messages until complete/error or WS disconnect
         timeout_seconds = 300  # 5 minutes max
@@ -108,7 +116,9 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
             if websocket.client_state != WebSocketState.CONNECTED:
                 break
 
-            message = await pubsub.get_message(ignore_subscribe_messages=True, timeout=poll_interval)
+            message = await pubsub.get_message(
+                ignore_subscribe_messages=True, timeout=poll_interval
+            )
             if message and message["type"] == "message":
                 data = message["data"]
                 try:
@@ -130,7 +140,9 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
     except Exception:
         logger.exception("WebSocket error for job %s", job_id)
         try:
-            await websocket.send_json({"type": "error", "message": "Internal server error"})
+            await websocket.send_json(
+                {"type": "error", "message": "Internal server error"}
+            )
         except Exception:
             pass
     finally:
@@ -176,14 +188,6 @@ def publish_progress_sync(job_id: str, event: dict) -> None:
             await client.aclose()
 
     try:
-        loop = asyncio.get_event_loop()
-        if loop.is_running():
-            # In a thread (typical for Celery with --pool=threads)
-            import concurrent.futures
-            with concurrent.futures.ThreadPoolExecutor(max_workers=1) as executor:
-                future = executor.submit(asyncio.run, _inner())
-                future.result(timeout=5)
-        else:
-            loop.run_until_complete(_inner())
+        asyncio.run(_inner())
     except Exception:
         logger.exception("Failed to publish progress for job %s", job_id)

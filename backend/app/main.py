@@ -9,6 +9,7 @@ Production-quality setup:
   - Graceful shutdown
   - WebSocket endpoint for real-time job progress
 """
+
 from __future__ import annotations
 
 import logging
@@ -40,6 +41,7 @@ logger = logging.getLogger(__name__)
 
 # ── Lifespan ──────────────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting OpenSpeakers backend (env=%s)", settings.ENVIRONMENT)
@@ -47,12 +49,16 @@ async def lifespan(app: FastAPI):
     # Run DB migrations
     try:
         from app.db.migrations import run_migrations
+
         run_migrations()
     except Exception:
-        logger.exception("Migration failed — the database may be unavailable. Continuing.")
+        logger.exception(
+            "Migration failed — the database may be unavailable. Continuing."
+        )
 
     # Ensure audio output directory exists
     from pathlib import Path
+
     Path(settings.AUDIO_OUTPUT_DIR).mkdir(parents=True, exist_ok=True)
 
     logger.info("OpenSpeakers backend ready")
@@ -79,9 +85,10 @@ app.add_middleware(RequestIDMiddleware)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=[
-        "http://localhost:5173",    # Vite dev server
+        "http://localhost:5173",  # Vite dev server
+        "http://localhost:5200",  # Mapped dev port
         "http://localhost:3000",
-        "http://frontend:5173",     # Docker network
+        "http://frontend:5173",  # Docker network
     ],
     allow_credentials=True,
     allow_methods=["*"],
@@ -92,8 +99,11 @@ app.add_middleware(
 
 # ── Exception handlers ────────────────────────────────────────────────────────
 
+
 @app.exception_handler(StarletteHTTPException)
-async def http_exception_handler(request: Request, exc: StarletteHTTPException) -> JSONResponse:
+async def http_exception_handler(
+    request: Request, exc: StarletteHTTPException
+) -> JSONResponse:
     return JSONResponse(
         status_code=exc.status_code,
         content={
@@ -122,7 +132,9 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
     request_id = getattr(request.state, "request_id", "unknown")
     logger.exception(
         "Unhandled exception [request_id=%s] %s %s",
-        request_id, request.method, request.url.path,
+        request_id,
+        request.method,
+        request.url.path,
     )
     return JSONResponse(
         status_code=500,
@@ -135,6 +147,7 @@ async def generic_exception_handler(request: Request, exc: Exception) -> JSONRes
 
 
 # ── Request timing middleware (simple) ───────────────────────────────────────
+
 
 @app.middleware("http")
 async def add_process_time_header(request: Request, call_next):

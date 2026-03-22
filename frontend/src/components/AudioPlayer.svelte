@@ -1,19 +1,30 @@
 <script lang="ts">
-  export let src: string = '';
-  export let duration: number | null = null;
-  export let disabled: boolean = false;
+  let {
+    src = '',
+    duration = null,
+    disabled = false
+  }: {
+    src?: string;
+    duration?: number | null;
+    disabled?: boolean;
+  } = $props();
 
-  let audio: HTMLAudioElement;
-  let playing = false;
-  let currentTime = 0;
-  let totalDuration = 0;
-  let volume = 1;
+  let audio: HTMLAudioElement | undefined = $state();
+  let paused = $state(true);
+  let currentTime = $state(0);
+  let totalDuration = $state(0);
+  let volume = $state(1);
 
-  $: if (src && audio) {
-    audio.load();
-    playing = false;
-    currentTime = 0;
-  }
+  let playing = $derived(!paused);
+  let progress = $derived(totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0);
+
+  $effect(() => {
+    if (src && audio) {
+      audio.load();
+      paused = true;
+      currentTime = 0;
+    }
+  });
 
   function toggle(): void {
     if (!audio || !src) return;
@@ -37,21 +48,19 @@
     const sec = Math.floor(s % 60);
     return `${m}:${sec.toString().padStart(2, '0')}`;
   }
-
-  $: progress = totalDuration > 0 ? (currentTime / totalDuration) * 100 : 0;
 </script>
 
 <div class="space-y-2">
   {#if src}
-    <!-- svelte-ignore a11y-media-has-caption -->
+    <!-- svelte-ignore a11y_media_has_caption -->
     <audio
       bind:this={audio}
       bind:currentTime
       bind:duration={totalDuration}
-      bind:paused={playing}
-      on:play={() => (playing = true)}
-      on:pause={() => (playing = false)}
-      on:ended={() => (playing = false)}
+      bind:paused
+      onplay={() => (paused = false)}
+      onpause={() => (paused = true)}
+      onended={() => (paused = true)}
       preload="metadata"
     >
       <source {src} type="audio/wav" />
@@ -60,7 +69,7 @@
     <div class="flex items-center gap-3">
       <!-- Play/Pause button -->
       <button
-        on:click={toggle}
+        onclick={toggle}
         class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full
                bg-primary-600 hover:bg-primary-700 text-white transition-colors"
         aria-label={playing ? 'Pause' : 'Play'}
@@ -80,11 +89,11 @@
 
       <!-- Progress bar -->
       <div class="flex-1 group">
-        <!-- svelte-ignore a11y-click-events-have-key-events -->
-        <!-- svelte-ignore a11y-no-static-element-interactions -->
+        <!-- svelte-ignore a11y_click_events_have_key_events -->
+        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="relative h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full cursor-pointer"
-          on:click={seek}
+          onclick={seek}
           role="slider"
           aria-label="Seek"
           aria-valuemin={0}

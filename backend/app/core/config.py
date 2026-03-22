@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import os
 from functools import lru_cache
 
 from pydantic_settings import BaseSettings
@@ -44,6 +43,7 @@ class Settings(BaseSettings):
     # Models
     ENABLED_MODELS: str = ""  # comma-separated; empty = all registered models
     VIBEVOICE_MODEL_PATH: str = "microsoft/VibeVoice-Realtime-0.5B"
+    VIBEVOICE_1P5B_MODEL_PATH: str = "microsoft/VibeVoice-1.5B"
     FISH_SPEECH_MODEL_PATH: str = "fishaudio/fish-speech-1.5"
     QWEN3_TTS_MODEL_PATH: str = "Qwen/Qwen3-TTS"
     KOKORO_MODEL_PATH: str = "hexgrad/Kokoro-82M"

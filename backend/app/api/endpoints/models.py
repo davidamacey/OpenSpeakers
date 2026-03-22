@@ -1,4 +1,5 @@
 """Model listing and status endpoints."""
+
 from __future__ import annotations
 
 from fastapi import APIRouter, HTTPException

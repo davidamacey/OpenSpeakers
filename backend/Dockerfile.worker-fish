@@ -1,0 +1,73 @@
+# open_speakers worker-fish — Fish Speech inference container
+# Separate from the main worker because fish-speech needs its own CUDA build.
+# Listens on the `tts.fish-speech` Celery queue.
+
+FROM python:3.12-slim AS base
+
+WORKDIR /app
+
+# ── System dependencies ─────────────────────────────────────────────────────
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    git \
+    ffmpeg \
+    libsndfile1 \
+    libpq-dev \
+    gcc \
+    portaudio19-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# ── PyTorch cu128 ───────────────────────────────────────────────────────────
+RUN pip install --no-cache-dir \
+    torch torchaudio \
+    --index-url https://download.pytorch.org/whl/cu128
+
+# ── Fish Speech from source ─────────────────────────────────────────────────
+# Install with --no-deps to skip pyaudio (not needed for inference, only mic input).
+# Then install the inference-time deps we actually need.
+RUN git clone --depth 1 https://github.com/fishaudio/fish-speech.git /opt/fish-speech && \
+    cd /opt/fish-speech && \
+    pip install --no-cache-dir --no-deps -e . && \
+    pip install --no-cache-dir \
+    "natsort" \
+    "loralib" \
+    "lightning" \
+    "pytorch-lightning" \
+    "tiktoken>=0.8.0" \
+    "descript-audio-codec" \
+    "descript-audiotools" \
+    "hydra-core>=1.3.2" \
+    "einops>=0.7.0" \
+    "silero-vad" \
+    "loguru>=0.6.0" \
+    "antlr4-python3-runtime" \
+    "julius" \
+    "randomname" \
+    "argbind" \
+    "pyrootutils"
+
+# ── Additional ML deps ──────────────────────────────────────────────────────
+RUN pip install --no-cache-dir \
+    transformers \
+    accelerate \
+    soundfile \
+    numpy \
+    scipy \
+    librosa
+
+# ── OpenSpeakers backend deps (celery, DB, API framework) ──────────────────
+RUN pip install --no-cache-dir \
+    "celery>=5.4.0" \
+    "redis[asyncio]>=5.0.0" \
+    "sqlalchemy>=2.0.30" \
+    "alembic>=1.13.0" \
+    "psycopg2-binary>=2.9.9" \
+    "pydantic>=2.6.0" \
+    "pydantic-settings>=2.3.0" \
+    "python-dotenv>=1.0.0" \
+    "httpx>=0.27.0" \
+    "fastapi>=0.115.0"
+
+# ── Application code ────────────────────────────────────────────────────────
+COPY . .
+
+RUN mkdir -p /app/audio_output

@@ -1,30 +1,41 @@
 <!-- Real-time job progress using WebSocket.
-     Shows spinner → model loading bar → generation bar → complete.
+     Shows spinner -> model loading bar -> generation bar -> complete.
      Never shows a blank "waiting" state to the user. -->
 <script lang="ts">
-  import { onDestroy } from 'svelte';
   import { JobProgressSocket, type ProgressEvent, type ProgressStep } from '$lib/api/ws';
   import type { TTSJob } from '$api/tts';
 
-  export let job: TTSJob | null = null;
-  export let onComplete: (audioUrl: string, duration: number) => void = () => {};
-  export let onError: (message: string) => void = () => {};
+  let {
+    job = null,
+    onComplete = (_audioUrl: string, _duration: number) => {},
+    onError = (_message: string) => {}
+  }: {
+    job?: TTSJob | null;
+    onComplete?: (audioUrl: string, duration: number) => void;
+    onError?: (message: string) => void;
+  } = $props();
 
-  let step: ProgressStep = 'queued';
-  let percent = 0;
-  let etaSeconds: number | null = null;
-  let detail = 'Job queued, waiting for worker…';
-  let socket: JobProgressSocket | null = null;
+  let step: ProgressStep = $state('queued');
+  let percent = $state(0);
+  let etaSeconds: number | null = $state(null);
+  let detail = $state('Job queued, waiting for worker...');
+  let socket: JobProgressSocket | null = $state(null);
 
-  $: if (job && job.status !== 'complete' && job.status !== 'failed') {
-    startSocket(job.id);
-  }
+  $effect(() => {
+    if (job && job.status !== 'complete' && job.status !== 'failed') {
+      startSocket(job.id);
+    }
+
+    return () => {
+      socket?.disconnect();
+    };
+  });
 
   function startSocket(jobId: string): void {
     socket?.disconnect();
     step = 'queued';
     percent = 0;
-    detail = 'Job queued, waiting for worker…';
+    detail = 'Job queued, waiting for worker...';
 
     socket = new JobProgressSocket(jobId, handleProgress);
     socket.connect();
@@ -52,12 +63,12 @@
   }
 
   function stepLabel(s: ProgressStep, pct: number): string {
-    if (s === 'queued') return 'Job queued, waiting for worker…';
-    if (s === 'model_loading') return `Loading model… ${pct}%`;
-    if (s === 'generating') return `Generating audio… ${pct}%`;
+    if (s === 'queued') return 'Job queued, waiting for worker...';
+    if (s === 'model_loading') return `Loading model... ${pct}%`;
+    if (s === 'generating') return `Generating audio... ${pct}%`;
     if (s === 'complete') return 'Generation complete!';
     if (s === 'error') return 'Generation failed';
-    return 'Processing…';
+    return 'Processing...';
   }
 
   function barColor(s: ProgressStep): string {
@@ -65,8 +76,6 @@
     if (s === 'complete') return 'bg-green-500';
     return 'bg-primary-500';
   }
-
-  onDestroy(() => socket?.disconnect());
 </script>
 
 {#if job && job.status !== 'complete' && job.status !== 'failed'}
@@ -97,11 +106,11 @@
     <!-- Step indicators -->
     <div class="flex gap-4 text-xs text-gray-400">
       <span class:text-primary-500={step === 'queued'}>Queued</span>
-      <span>→</span>
+      <span>-></span>
       <span class:text-primary-500={step === 'model_loading'}>Loading model</span>
-      <span>→</span>
+      <span>-></span>
       <span class:text-primary-500={step === 'generating'}>Generating</span>
-      <span>→</span>
+      <span>-></span>
       <span class:text-green-500={step === 'complete'}>Done</span>
     </div>
   </div>

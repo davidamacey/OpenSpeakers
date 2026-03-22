@@ -1,13 +1,21 @@
 <!doctype html>
-<html lang="en">
+<html lang="en" class="dark">
   <head>
     <meta charset="utf-8" />
     <link rel="icon" href="%sveltekit.assets%/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1" />
     <meta name="description" content="OpenSpeakers — unified TTS and voice cloning" />
+    <script>
+      (function() {
+        var t = localStorage.getItem('openspeakers-theme');
+        if (t === 'light') {
+          document.documentElement.classList.remove('dark');
+        }
+      })();
+    </script>
     %sveltekit.head%
   </head>
-  <body data-sveltekit-preload-data="hover" class="bg-gray-50 dark:bg-gray-900 text-gray-900 dark:text-gray-100">
+  <body data-sveltekit-preload-data="hover" class="bg-gray-50 dark:bg-gray-950 text-gray-900 dark:text-gray-100 transition-colors">
     <div style="display: contents">%sveltekit.body%</div>
   </body>
 </html>

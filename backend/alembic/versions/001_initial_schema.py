@@ -4,6 +4,7 @@ Revision ID: 001_initial_schema
 Revises:
 Create Date: 2026-03-19
 """
+
 from __future__ import annotations
 
 from typing import Sequence, Union

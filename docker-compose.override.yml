@@ -20,9 +20,65 @@ services:
       dockerfile: Dockerfile.worker
     volumes:
       - ./backend:/app
-      - ${MODEL_CACHE_DIR:-./models}/huggingface:/home/appuser/.cache/huggingface
-      - ${MODEL_CACHE_DIR:-./models}/torch:/home/appuser/.cache/torch
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/torch:/root/.cache/torch
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+      # VibeVoice custom fork — mounted for editable development
+      - ${VIBEVOICE_REPO_PATH:-/mnt/nvm/repos/VibeVoice}:/opt/vibevoice
+      # NAS models — local model weights (avoid HuggingFace downloads)
+      - /mnt/nas/models:/models
+    environment:
+      # Add VibeVoice to Python path so it can be imported
+      - PYTHONPATH=/opt/vibevoice:${PYTHONPATH:-}
+      # Use local model paths instead of HuggingFace repo IDs
+      - VIBEVOICE_MODEL_PATH=/models/vibevoice/VibeVoice-Realtime-0.5B
+      - VIBEVOICE_1P5B_MODEL_PATH=/models/vibevoice/VibeVoice-1.5B
+
+  worker-fish:
+    image: open_speakers-worker-fish:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker-fish
+    volumes:
+      - ./backend:/app
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+      # NAS models — local model weights (avoid HuggingFace downloads)
+      - /mnt/nas/models:/models
+    environment:
+      - PYTHONPATH=/app
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - FISH_SPEECH_MODEL_PATH=/models/fish-speech/s2-pro
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.fish-speech
+      --pool=threads --concurrency=1
+      --hostname fish-worker@%h -E
+
+  worker-qwen3:
+    image: open_speakers-worker-qwen3:latest
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker-qwen3
+    volumes:
+      - ./backend:/app
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+      # NAS models — local model weights (avoid HuggingFace downloads)
+      - /mnt/nas/models:/models
+    environment:
+      - PYTHONPATH=/app
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.qwen3
+      --pool=threads --concurrency=1
+      --hostname qwen3-worker@%h -E
 
   frontend:
     image: open_speakers-frontend:latest
