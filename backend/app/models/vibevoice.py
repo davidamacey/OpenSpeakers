@@ -162,12 +162,19 @@ class VibeVoiceModel(TTSModelBase):
             if torch.is_tensor(v):
                 inputs[k] = v.to(self._device)
 
+        # Read tunable params from extras (clamp to safe ranges)
+        cfg_scale = float(request.extra.get("cfg_scale", 1.5))
+        cfg_scale = max(0.1, min(cfg_scale, 10.0))
+        ddpm_steps = int(request.extra.get("ddpm_steps", 5))
+        ddpm_steps = max(1, min(ddpm_steps, 50))
+        self._model.set_ddpm_inference_steps(num_steps=ddpm_steps)
+
         # Generate audio
         with torch.no_grad():
             outputs = self._model.generate(
                 **inputs,
                 max_new_tokens=None,
-                cfg_scale=1.5,
+                cfg_scale=cfg_scale,
                 tokenizer=self._processor.tokenizer,
                 generation_config={"do_sample": False},
                 verbose=False,

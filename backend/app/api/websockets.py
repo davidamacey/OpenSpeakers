@@ -1,7 +1,11 @@
-"""WebSocket endpoint for real-time TTS job progress.
+"""WebSocket endpoints for real-time updates.
 
-Architecture:
-  1. Client submits POST /api/tts/generate → gets job_id
+Endpoints:
+  /ws/jobs/{job_id} — Real-time TTS job progress
+  /ws/gpu           — GPU stats push (every 5 seconds)
+
+Job progress architecture:
+  1. Client submits POST /api/tts/generate -> gets job_id
   2. Client immediately connects to ws://<host>/ws/jobs/<job_id>
   3. FastAPI WS handler subscribes to Redis pub/sub channel "job:<job_id>"
   4. Celery worker publishes progress events to that channel
@@ -14,6 +18,9 @@ Progress event schema (JSON):
   { "type": "complete",  "job_id": "...", "audio_url": "/api/tts/jobs/.../audio", "duration": 4.2 }
   { "type": "error",     "message": "..." }
   { "type": "status",    "status": "running", "detail": "Loading VibeVoice 0.5B..." }
+
+GPU stats event schema (JSON):
+  { "type": "gpu_stats", "gpu": { ... }, "current_model": "kokoro" }
 """
 
 from __future__ import annotations
@@ -27,8 +34,10 @@ import redis.asyncio as aioredis
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from fastapi.websockets import WebSocketState
 
+from app.api.endpoints.system import _get_nvidia_smi_stats
 from app.core.config import settings
 from app.db.models import JobStatus, TTSJob
+from app.models.manager import ModelManager
 
 logger = logging.getLogger(__name__)
 
@@ -155,25 +164,79 @@ async def job_progress_ws(websocket: WebSocket, job_id: str) -> None:
             await websocket.close()
 
 
-async def publish_progress(
-    redis_url: str,
-    job_id: str,
-    event: dict,
-) -> None:
-    """Publish a progress event from a Celery worker.
+def _build_gpu_stats_payload() -> dict:
+    """Build the GPU stats payload, reusing nvidia-smi helper from system endpoint."""
+    manager = ModelManager.get_instance()
 
-    This is called from the synchronous Celery task using asyncio.run().
+    gpu_info: dict = {}
+    try:
+        import torch
+
+        if torch.cuda.is_available():
+            device_id = settings.GPU_DEVICE_ID
+            gpu_info = {
+                "available": True,
+                "device_id": device_id,
+                "device_name": torch.cuda.get_device_name(device_id),
+                "vram_total_gb": round(
+                    torch.cuda.get_device_properties(device_id).total_memory / 1e9, 1
+                ),
+                "vram_used_gb": round(torch.cuda.memory_allocated(device_id) / 1e9, 2),
+                "vram_reserved_gb": round(
+                    torch.cuda.memory_reserved(device_id) / 1e9, 2
+                ),
+                "nvidia_smi": _get_nvidia_smi_stats(device_id),
+            }
+        else:
+            gpu_info = {"available": False}
+    except ImportError:
+        gpu_info = {"available": False, "note": "torch not installed in API container"}
+
+    return {
+        "type": "gpu_stats",
+        "gpu": gpu_info,
+        "current_model": manager.current_model_id,
+    }
+
+
+_GPU_PUSH_INTERVAL_SECONDS = 5
+
+
+@ws_router.websocket("/ws/gpu")
+async def gpu_stats_ws(websocket: WebSocket) -> None:
+    """Push GPU stats to the client every 5 seconds.
+
+    On connect, sends current stats immediately, then updates periodically.
+    The client can close the connection at any time.
     """
-    import asyncio
+    await websocket.accept()
+    logger.info("GPU stats WebSocket connected from %s", websocket.client)
 
-    async def _publish():
-        client = aioredis.from_url(redis_url, decode_responses=True)
-        try:
-            await client.publish(job_channel(job_id), json.dumps(event))
-        finally:
-            await client.aclose()
+    try:
+        loop = asyncio.get_running_loop()
 
-    asyncio.run(_publish())
+        # Send initial stats immediately
+        payload = await loop.run_in_executor(None, _build_gpu_stats_payload)
+        await websocket.send_json(payload)
+
+        # Periodic updates
+        while True:
+            await asyncio.sleep(_GPU_PUSH_INTERVAL_SECONDS)
+
+            if websocket.client_state != WebSocketState.CONNECTED:
+                break
+
+            payload = await loop.run_in_executor(None, _build_gpu_stats_payload)
+            await websocket.send_json(payload)
+
+    except WebSocketDisconnect:
+        logger.debug("GPU stats WebSocket disconnected")
+    except Exception:
+        logger.exception("GPU stats WebSocket error")
+    finally:
+        if websocket.client_state == WebSocketState.CONNECTED:
+            await websocket.close()
+        logger.debug("GPU stats WebSocket closed")
 
 
 def publish_progress_sync(job_id: str, event: dict) -> None:

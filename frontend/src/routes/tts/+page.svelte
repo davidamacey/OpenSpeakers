@@ -2,6 +2,8 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import ModelSelector from '$components/ModelSelector.svelte';
+  import ModelParams from '$components/ModelParams.svelte';
+  import GpuStatus from '$components/GpuStatus.svelte';
   import AudioPlayer from '$components/AudioPlayer.svelte';
   import JobProgress from '$components/JobProgress.svelte';
   import ErrorBanner from '$components/ErrorBanner.svelte';
@@ -19,8 +21,8 @@
   let text = $state('');
   let selectedVoiceId: string | null = $state(null);
   let speed = $state(1.0);
-  let pitch = $state(0.0);
   let language = $state('en');
+  let modelExtras: Record<string, unknown> = $state({});
 
   let generating = $state(false);
   let currentJob: TTSJob | null = $state(null);
@@ -48,6 +50,7 @@
   let charCount = $derived(text.length);
   let canGenerate = $derived(!!selectedModel && !!text.trim() && !generating);
   let hasVoices = $derived(builtinVoices.length > 0 || clonedVoices.length > 0);
+  let selectedModelInfo = $derived($models.find((m) => m.id === selectedModel));
 
   onMount(() => {
     refreshModels();
@@ -96,8 +99,8 @@
         text: text.trim(),
         voice_id: selectedVoiceId,
         speed,
-        pitch,
         language,
+        extra: modelExtras,
       });
 
       // Seed a minimal job object so the progress component can connect immediately
@@ -107,7 +110,7 @@
         text: text.trim(),
         voice_id: selectedVoiceId,
         voice_profile_id: null,
-        parameters: { speed, pitch, language },
+        parameters: { speed, language, extra: modelExtras },
         status: 'pending',
         error_message: null,
         output_path: null,
@@ -182,6 +185,12 @@
         {/if}
       </div>
 
+      <!-- GPU Status -->
+      <GpuStatus
+        selectedModelVram={selectedModelInfo?.vram_gb_estimate ?? 0}
+        {generating}
+      />
+
       <!-- Text input -->
       <div class="card p-4 space-y-2">
         <label class="label" for="tts-text">Text</label>
@@ -237,10 +246,24 @@
       <!-- Parameters -->
       <div class="card p-4 space-y-4">
         <h2 class="section-title text-sm">Parameters</h2>
-        <div class="grid grid-cols-3 gap-4">
-          <!-- Speed -->
+
+        <!-- Language: all models -->
+        <div>
+          <label class="label" for="language">Language</label>
+          <select id="language" bind:value={language} disabled={generating} class="input">
+            {#each LANGUAGES as lang}
+              <option value={lang.code}>{lang.name}</option>
+            {/each}
+          </select>
+        </div>
+
+        <!-- Speed: Kokoro only (only model that natively supports it) -->
+        {#if selectedModel === 'kokoro'}
           <div>
-            <label class="label" for="speed">Speed: {speed.toFixed(1)}x</label>
+            <label class="label" for="speed">
+              Speed: {speed.toFixed(1)}x
+              {#if speed === 1.0}<span class="label-hint">(default)</span>{/if}
+            </label>
             <input
               id="speed"
               type="range"
@@ -252,32 +275,10 @@
               class="w-full"
             />
           </div>
-          <!-- Pitch -->
-          <div>
-            <label class="label" for="pitch">
-              Pitch: {pitch > 0 ? '+' : ''}{pitch} st
-            </label>
-            <input
-              id="pitch"
-              type="range"
-              min="-12"
-              max="12"
-              step="1"
-              bind:value={pitch}
-              disabled={generating}
-              class="w-full"
-            />
-          </div>
-          <!-- Language -->
-          <div>
-            <label class="label" for="language">Language</label>
-            <select id="language" bind:value={language} disabled={generating} class="input">
-              {#each LANGUAGES as lang}
-                <option value={lang.code}>{lang.name}</option>
-              {/each}
-            </select>
-          </div>
-        </div>
+        {/if}
+
+        <!-- Model-specific parameters -->
+        <ModelParams modelId={selectedModel} disabled={generating} bind:extras={modelExtras} />
       </div>
 
       <!-- Generate button -->
