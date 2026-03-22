@@ -4,6 +4,10 @@
   import { goto } from '$app/navigation';
 </script>
 
+<svelte:head>
+  <title>{$page.status} Error | OpenSpeakers</title>
+</svelte:head>
+
 <div class="flex items-center justify-center min-h-screen p-6">
   <div class="text-center max-w-md space-y-6">
     <!-- Status code -->
@@ -16,7 +20,9 @@
       <h1 class="page-title text-xl">
         {#if $page.status === 404}
           Page not found
-        {:else if $page.status === 500}
+        {:else if $page.status === 403}
+          Access denied
+        {:else if $page.status >= 500}
           Server error
         {:else}
           Something went wrong

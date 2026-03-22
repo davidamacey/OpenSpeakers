@@ -43,6 +43,14 @@
     audio.currentTime = pct * totalDuration;
   }
 
+  function seekKeydown(e: KeyboardEvent): void {
+    if (!audio || !totalDuration) return;
+    if (e.key === 'ArrowRight') { e.preventDefault(); audio.currentTime = Math.min(totalDuration, currentTime + 5); }
+    else if (e.key === 'ArrowLeft') { e.preventDefault(); audio.currentTime = Math.max(0, currentTime - 5); }
+    else if (e.key === 'Home') { e.preventDefault(); audio.currentTime = 0; }
+    else if (e.key === 'End') { e.preventDefault(); audio.currentTime = totalDuration; }
+  }
+
   function formatTime(s: number): string {
     const m = Math.floor(s / 60);
     const sec = Math.floor(s % 60);
@@ -89,11 +97,10 @@
 
       <!-- Progress bar -->
       <div class="flex-1 group">
-        <!-- svelte-ignore a11y_click_events_have_key_events -->
-        <!-- svelte-ignore a11y_no_static_element_interactions -->
         <div
           class="relative h-1.5 bg-gray-200 dark:bg-gray-600 rounded-full cursor-pointer"
           onclick={seek}
+          onkeydown={seekKeydown}
           role="slider"
           aria-label="Seek"
           aria-valuemin={0}

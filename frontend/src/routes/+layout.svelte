@@ -9,6 +9,9 @@
 
   let { children }: { children: Snippet } = $props();
 
+  let sidebarOpen = $state(false);
+  function closeSidebar(): void { sidebarOpen = false; }
+
   const navLinks = [
     { href: '/tts', label: 'TTS', icon: 'M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z' },
     { href: '/clone', label: 'Clone Voice', icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
@@ -25,9 +28,33 @@
   });
 </script>
 
+<!-- Mobile top bar -->
+<div class="md:hidden fixed top-0 left-0 right-0 z-40 flex items-center gap-3 px-4 py-3
+            bg-white dark:bg-[#111113] border-b border-gray-200 dark:border-[#1e1e22]">
+  <button onclick={() => (sidebarOpen = !sidebarOpen)}
+    class="p-1.5 rounded-lg hover:bg-gray-100 dark:hover:bg-white/[0.06] transition-colors"
+    aria-label="Toggle navigation">
+    <svg class="w-5 h-5 text-gray-600 dark:text-gray-300" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+    </svg>
+  </button>
+  <span class="sidebar-title text-base">OpenSpeakers</span>
+  <div class="ml-auto"><ThemeToggle /></div>
+</div>
+
+{#if sidebarOpen}
+  <!-- svelte-ignore a11y_no_static_element_interactions -->
+  <div class="md:hidden fixed inset-0 z-40 bg-black/50 transition-opacity"
+    onclick={closeSidebar}
+    role="presentation">
+  </div>
+{/if}
+
 <div class="min-h-screen flex">
   <!-- Sidebar nav -->
-  <nav class="sidebar">
+  <nav class="sidebar fixed inset-y-0 left-0 z-50 transition-transform duration-200
+            md:static md:translate-x-0
+            {sidebarOpen ? 'translate-x-0' : '-translate-x-full md:translate-x-0'}">
     <div class="sidebar-header">
       <h1 class="sidebar-title">OpenSpeakers</h1>
       <p class="sidebar-subtitle">TTS & Voice Cloning</p>
@@ -37,6 +64,7 @@
         <li>
           <a
             href={link.href}
+            onclick={closeSidebar}
             class="nav-link {currentPath.startsWith(link.href) ? 'nav-link-active' : ''}"
           >
             <svg class="w-[18px] h-[18px] flex-shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
@@ -63,7 +91,7 @@
   </nav>
 
   <!-- Main content -->
-  <main class="flex-1 overflow-auto">
+  <main class="flex-1 overflow-auto pt-14 md:pt-0">
     {@render children()}
   </main>
 </div>

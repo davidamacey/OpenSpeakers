@@ -149,6 +149,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>Text to Speech | OpenSpeakers</title>
+</svelte:head>
+
 <div class="p-6 max-w-4xl mx-auto space-y-6">
   <div class="page-header">
     <h1 class="page-title">Text to Speech</h1>
@@ -174,7 +178,7 @@
             <div class="h-16 bg-gray-100 dark:bg-[#18181b] rounded-lg"></div>
           </div>
         {:else if $models.length === 0 && !$modelsError}
-          <div class="text-sm text-gray-500 dark:text-gray-500 py-4 text-center">
+          <div class="text-sm text-gray-500 dark:text-gray-400 py-4 text-center">
             <p>No models available.</p>
             <button onclick={refreshModels} class="btn-secondary mt-2 text-xs">
               Refresh models
@@ -282,7 +286,7 @@
       </div>
 
       <!-- Generate button -->
-      <button onclick={handleGenerate} disabled={!canGenerate} class="btn-primary w-full py-3 text-base">
+      <button onclick={handleGenerate} disabled={!canGenerate} class="btn-primary w-full py-3 text-base" aria-label={generating ? 'Generating speech...' : 'Generate speech from text'}>
         {#if generating}
           <span class="spinner-sm"></span>
           Generating...
@@ -299,7 +303,7 @@
         <h2 class="section-title text-sm">Output</h2>
 
         {#if errorMessage}
-          <ErrorBanner message={errorMessage} onDismiss={dismissError} />
+          <ErrorBanner message={errorMessage} onDismiss={dismissError} onRetry={handleGenerate} />
         {/if}
 
         <!-- Live progress via WebSocket -->

@@ -79,7 +79,7 @@
 </script>
 
 {#if job && job.status !== 'complete' && job.status !== 'failed'}
-  <div class="space-y-2">
+  <div class="space-y-2" role="status" aria-live="polite">
     <!-- Status line -->
     <div class="flex items-center gap-2 text-sm">
       {#if step !== 'complete' && step !== 'error'}
@@ -96,7 +96,7 @@
     </div>
 
     <!-- Progress bar -->
-    <div class="h-1.5 bg-gray-200 dark:bg-gray-700 rounded-full overflow-hidden">
+    <div class="h-1.5 bg-gray-200 dark:bg-[#2a2a2f] rounded-full overflow-hidden">
       <div
         class="h-full rounded-full transition-all duration-300 {barColor(step)}"
         style="width: {step === 'queued' ? 3 : percent}%"

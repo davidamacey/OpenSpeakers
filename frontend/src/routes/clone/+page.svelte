@@ -164,6 +164,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>Voice Cloning | OpenSpeakers</title>
+</svelte:head>
+
 <div class="p-6 max-w-3xl mx-auto space-y-6">
   <!-- Page header -->
   <div class="page-header">
@@ -195,9 +199,9 @@
     <div class="text-sm leading-relaxed">
       <p class="font-medium">Voice cloning requires a compatible model</p>
       <p class="mt-1 text-sky-700 dark:text-sky-400/80">
-        Currently supported: <strong>Fish Speech</strong>, <strong>VibeVoice 1.5B</strong>.
-        Upload <strong>5-30 seconds</strong> of clean speech for best results. Avoid background
-        noise or music.
+        Currently supported: <strong>Fish Audio S2-Pro</strong>, <strong>VibeVoice 1.5B</strong>,
+        and <strong>Qwen3 TTS</strong>. Upload <strong>5-30 seconds</strong> of clean speech for
+        best results. Avoid background noise or music.
       </p>
     </div>
   </div>
@@ -404,7 +408,7 @@
 
             <div class="flex-1 min-w-0">
               <div class="flex items-center gap-2 flex-wrap">
-                <p class="font-medium text-sm text-gray-900 dark:text-gray-100">{voice.name}</p>
+                <p class="font-medium text-sm text-gray-900 dark:text-gray-100 truncate" title={voice.name}>{voice.name}</p>
                 <span class="badge-available">{voice.model_id}</span>
               </div>
               <p class="text-xs text-gray-400 mt-0.5">{formatDate(voice.created_at)}</p>

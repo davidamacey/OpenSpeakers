@@ -46,19 +46,19 @@
       githubLink: 'https://github.com/davidamacey/VibeVoice',
     },
     {
-      name: 'Fish Speech 1.5',
+      name: 'Fish Audio S2-Pro',
       org: 'Fish Audio',
-      description: 'Zero-shot multilingual voice cloning with high fidelity.',
+      description: 'Zero-shot voice cloning with emotion tags and 80+ language support.',
       features: [
-        'Zero-shot voice cloning',
-        'Multilingual support',
-        'High-fidelity audio output',
+        'Zero-shot voice cloning from 3-10s reference audio',
+        '80+ languages with emotion tag control',
+        'DualAR architecture with DAC codec',
       ],
-      vram: '~5 GB',
+      vram: '~22 GB',
       cloning: true,
       cloningLabel: 'Zero-shot cloning',
       comingSoon: false,
-      hfLink: 'https://huggingface.co/fishaudio/fish-speech-1.5',
+      hfLink: 'https://huggingface.co/fishaudio/s2-pro',
     },
     {
       name: 'Kokoro 82M',
@@ -92,6 +92,10 @@
     },
   ];
 </script>
+
+<svelte:head>
+  <title>About | OpenSpeakers</title>
+</svelte:head>
 
 <div class="p-6 max-w-4xl mx-auto space-y-8">
   <!-- Header -->

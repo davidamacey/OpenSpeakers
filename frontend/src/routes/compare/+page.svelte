@@ -188,6 +188,10 @@
   }
 </script>
 
+<svelte:head>
+  <title>Model Comparison | OpenSpeakers</title>
+</svelte:head>
+
 <div class="p-6 max-w-5xl mx-auto space-y-6">
   <div class="page-header">
     <h1 class="page-title">Model Comparison</h1>
@@ -213,10 +217,11 @@
         disabled={generating}
         maxlength={4096}
       ></textarea>
+      <div class="text-xs text-gray-400 dark:text-gray-600 text-right mt-1">{text.length} / 4096</div>
     </div>
 
     <div>
-      <p class="label">Select models to compare (up to 4)</p>
+      <p class="label">Select models to compare <span class="label-hint">({totalSelected} of 4)</span></p>
 
       {#if $modelsLoading}
         <div class="flex gap-2 mt-1">
@@ -236,6 +241,7 @@
           {#each allModels as model}
             <button
               onclick={() => toggleModel(model.id)}
+              title={model.name}
               class="px-3 py-1.5 rounded-lg border text-sm font-medium transition-colors
                 {selectedModelIds.includes(model.id)
                 ? 'border-primary-500 bg-primary-50 text-primary-700 dark:bg-primary-900/30 dark:text-primary-400'
@@ -318,7 +324,7 @@
             {idx === currentIndex ? 'ring-1 ring-primary-500/50 dark:ring-primary-400/30' : ''}"
         >
           <div class="flex items-center justify-between gap-2">
-            <h3 class="font-semibold text-gray-900 dark:text-gray-100 truncate">
+            <h3 class="font-semibold text-gray-900 dark:text-gray-100 truncate" title={result.model.name}>
               {result.model.name}
             </h3>
             <span class="{statusBadgeClass(result.status)} flex-shrink-0">
@@ -364,7 +370,7 @@
               {/if}
             </div>
           {:else if result.status === 'failed'}
-            <div class="text-sm text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg p-3">
+            <div class="text-sm text-red-500 dark:text-red-400 bg-red-50 dark:bg-red-900/20 rounded-lg p-3 break-words">
               {result.error}
             </div>
           {/if}

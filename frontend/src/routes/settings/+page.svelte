@@ -2,6 +2,7 @@
 <script lang="ts">
   import { onMount } from 'svelte';
   import { models, refreshModels } from '$stores/models';
+  import ErrorBanner from '$components/ErrorBanner.svelte';
   import axiosInstance from '$lib/axios';
 
   interface NvidiaSmi {
@@ -39,7 +40,11 @@
   let systemInfo: SystemInfo | null = $state(null);
   let loadingInfo = $state(false);
   let loadError = $state('');
-  let autoRefresh = $state(false);
+  let autoRefresh = $state(true);
+  let wsConnected = $state(false);
+
+  // WebSocket for live GPU stats
+  let ws: WebSocket | null = null;
 
   // Derived GPU stats
   let vramPct = $derived.by(() => {
@@ -70,13 +75,66 @@
     return Math.round((systemInfo.disk.used_gb / systemInfo.disk.total_gb) * 100);
   });
 
-  // Auto-refresh effect with cleanup
+  // WebSocket connection for live GPU stats
+  function connectWs(): void {
+    const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+    const host = window.location.host;
+    ws = new WebSocket(`${protocol}//${host}/ws/gpu`);
+
+    ws.onopen = () => {
+      wsConnected = true;
+    };
+
+    ws.onmessage = (event) => {
+      try {
+        const data = JSON.parse(event.data);
+        if (data.type === 'gpu_stats' && systemInfo) {
+          systemInfo = {
+            ...systemInfo,
+            current_model: data.current_model,
+            gpu: { ...systemInfo.gpu, ...data.gpu },
+          };
+        } else if (data.type === 'gpu_stats') {
+          // First WS message before REST load completes — store partial data
+          systemInfo = {
+            current_model: data.current_model,
+            registered_models: [],
+            gpu: data.gpu ?? { available: false },
+            disk: systemInfo?.disk ?? { total_gb: 0, used_gb: 0, free_gb: 0 },
+            audio_output_dir: systemInfo?.audio_output_dir ?? '',
+            model_cache_dir: systemInfo?.model_cache_dir ?? '',
+          };
+        }
+      } catch {
+        // Ignore malformed messages
+      }
+    };
+
+    ws.onclose = () => {
+      wsConnected = false;
+    };
+
+    ws.onerror = () => {
+      wsConnected = false;
+    };
+  }
+
+  function disconnectWs(): void {
+    if (ws) {
+      ws.close();
+      ws = null;
+      wsConnected = false;
+    }
+  }
+
+  // Toggle auto-refresh between WS (live) and manual
   $effect(() => {
-    if (!autoRefresh) return;
-    const interval = setInterval(() => {
-      loadSystemInfo();
-    }, 5000);
-    return () => clearInterval(interval);
+    if (autoRefresh) {
+      connectWs();
+    } else {
+      disconnectWs();
+    }
+    return () => disconnectWs();
   });
 
   onMount(async () => {
@@ -85,7 +143,6 @@
   });
 
   async function loadSystemInfo(): Promise<void> {
-    // Only show loading spinner on initial load, not on auto-refresh
     if (!systemInfo) loadingInfo = true;
     loadError = '';
     try {
@@ -95,6 +152,13 @@
       loadError = err instanceof Error ? err.message : 'Failed to load system info';
     } finally {
       loadingInfo = false;
+    }
+  }
+
+  function handleSwitchKeydown(e: KeyboardEvent): void {
+    if (e.key === ' ' || e.key === 'Enter') {
+      e.preventDefault();
+      autoRefresh = !autoRefresh;
     }
   }
 
@@ -110,6 +174,10 @@
     return 'bg-emerald-500';
   }
 </script>
+
+<svelte:head>
+  <title>Settings | OpenSpeakers</title>
+</svelte:head>
 
 <div class="p-6 max-w-4xl mx-auto space-y-6">
   <!-- Page header -->
@@ -127,12 +195,13 @@
       <div class="flex items-center gap-3">
         <!-- Auto-refresh toggle -->
         <label class="flex items-center gap-2 cursor-pointer select-none">
-          <span class="text-xs text-gray-500 dark:text-gray-400">Auto-refresh</span>
+          <span class="text-xs text-gray-500 dark:text-gray-400">Live</span>
           <button
             type="button"
             role="switch"
             aria-checked={autoRefresh}
             onclick={() => (autoRefresh = !autoRefresh)}
+            onkeydown={handleSwitchKeydown}
             class="relative inline-flex h-5 w-9 items-center rounded-full transition-colors duration-200
                    {autoRefresh
                      ? 'bg-primary-600 dark:bg-primary-500'
@@ -170,34 +239,7 @@
         <span class="text-sm text-gray-400">Loading system info...</span>
       </div>
     {:else if loadError && !systemInfo}
-      <div
-        class="flex items-start gap-3 p-4 rounded-lg
-               bg-red-950/50 border border-red-900/50 text-red-300 text-sm"
-      >
-        <svg
-          class="w-5 h-5 flex-shrink-0 text-red-400 mt-0.5"
-          fill="none"
-          stroke="currentColor"
-          viewBox="0 0 24 24"
-        >
-          <path
-            stroke-linecap="round"
-            stroke-linejoin="round"
-            stroke-width="2"
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
-          />
-        </svg>
-        <div class="flex-1">
-          <p>{loadError}</p>
-        </div>
-        <button
-          onclick={loadSystemInfo}
-          class="flex-shrink-0 px-3 py-1 text-xs font-medium rounded-md
-                 bg-red-900/50 hover:bg-red-900 text-red-200 transition-colors"
-        >
-          Retry
-        </button>
-      </div>
+      <ErrorBanner message={loadError} onRetry={loadSystemInfo} />
     {:else if systemInfo?.gpu.available}
       <div class="grid grid-cols-1 md:grid-cols-2 gap-4">
         <!-- Left column: core GPU info -->
@@ -314,22 +356,21 @@
         </div>
       </div>
 
-      <!-- Auto-refresh indicator -->
-      {#if autoRefresh}
+      <!-- Live indicator -->
+      {#if wsConnected}
         <div class="flex items-center gap-2 text-xs text-gray-400 pt-1">
           <div class="w-1.5 h-1.5 rounded-full bg-emerald-500 animate-pulse"></div>
-          Live -- refreshing every 5 seconds
+          Live &mdash; Refreshing every 5s
         </div>
       {/if}
     {:else if systemInfo}
       <div
-        class="flex items-start gap-3 p-4 rounded-lg
-               bg-amber-50 dark:bg-amber-500/10
-               border border-amber-200 dark:border-amber-500/20
-               text-amber-800 dark:text-amber-300 text-sm"
+        class="flex items-start gap-3 p-4 rounded-xl border
+               bg-sky-50 border-sky-200 text-sky-800
+               dark:bg-sky-500/10 dark:border-sky-500/20 dark:text-sky-300 text-sm"
       >
         <svg
-          class="w-5 h-5 flex-shrink-0 mt-0.5 text-amber-500"
+          class="w-5 h-5 flex-shrink-0 mt-0.5 text-sky-500 dark:text-sky-400"
           fill="none"
           stroke="currentColor"
           viewBox="0 0 24 24"
@@ -338,13 +379,16 @@
             stroke-linecap="round"
             stroke-linejoin="round"
             stroke-width="2"
-            d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-2.5L13.732 4c-.77-.833-1.964-.833-2.732 0L4.082 16.5c-.77.833.192 2.5 1.732 2.5z"
+            d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z"
           />
         </svg>
         <div>
-          <p class="font-medium">No NVIDIA GPU detected</p>
-          <p class="mt-1 text-amber-700 dark:text-amber-400/80">
-            {systemInfo.gpu.note ?? 'Models will run on CPU, which is significantly slower.'}
+          <p class="font-medium">GPU stats unavailable from API server</p>
+          <p class="mt-1 text-sky-700 dark:text-sky-400/80">
+            {systemInfo.gpu.note ?? 'The API server does not have direct GPU access. Models are loaded and run on the GPU by dedicated Celery worker containers.'}
+          </p>
+          <p class="mt-1 text-sky-600 dark:text-sky-400/60 text-xs">
+            Live GPU stats are visible on the TTS page via the GPU Status widget.
           </p>
         </div>
       </div>
@@ -427,13 +471,13 @@
       <dl class="space-y-3 text-sm">
         <div class="flex justify-between">
           <dt class="text-gray-500 dark:text-gray-400">Audio output</dt>
-          <dd class="font-mono text-xs text-gray-700 dark:text-gray-300 truncate max-w-xs">
+          <dd class="font-mono text-xs text-gray-700 dark:text-gray-300 truncate max-w-full sm:max-w-xs">
             {systemInfo.audio_output_dir}
           </dd>
         </div>
         <div class="flex justify-between">
           <dt class="text-gray-500 dark:text-gray-400">Model cache</dt>
-          <dd class="font-mono text-xs text-gray-700 dark:text-gray-300 truncate max-w-xs">
+          <dd class="font-mono text-xs text-gray-700 dark:text-gray-300 truncate max-w-full sm:max-w-xs">
             {systemInfo.model_cache_dir}
           </dd>
         </div>

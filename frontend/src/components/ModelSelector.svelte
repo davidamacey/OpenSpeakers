@@ -39,7 +39,7 @@
   </select>
 
   {#if selected}
-    <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-gray-700/50 text-sm">
+    <div class="flex items-start gap-3 p-3 rounded-lg bg-gray-50 dark:bg-white/[0.04] text-sm">
       <div class="mt-0.5 h-2 w-2 rounded-full flex-shrink-0 {statusDot(selected.status)}"></div>
       <div class="flex-1 min-w-0">
         <div class="flex items-center gap-2 flex-wrap">
