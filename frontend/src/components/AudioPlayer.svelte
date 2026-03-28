@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount, tick } from 'svelte';
+  import { onMount } from 'svelte';
   import { theme } from '$stores/theme';
 
   let {
@@ -33,14 +33,27 @@
     light: { wave: '#7dd3fc', progress: '#0284c7', cursor: '#0369a1' },
   };
 
+  // Cleanup on unmount
   onMount(() => {
-    // Use IIFE so the cleanup function is returned synchronously while init is async
-    (async () => {
-      await tick(); // ensure bind:this bindings are resolved before accessing audioEl
-      if (autoplay && audioEl && src) audioEl.play().catch(() => {});
-      await loadWaveSurfer();
-    })();
+    if (autoplay && audioEl && src) audioEl.play().catch(() => {});
     return () => { ws?.destroy(); ws = null; };
+  });
+
+  // Initialize (or reinitialize) WaveSurfer whenever src or waveContainer becomes available.
+  // $effect runs after DOM updates, so bind:this is already committed — no timing hacks needed.
+  // The clearTimeout cleanup prevents double-initialization when both change together.
+  $effect(() => {
+    const currentSrc = src;
+    const container = waveContainer;
+    if (!currentSrc || !container) return;
+    wsReady = false;
+    ws?.destroy();
+    ws = null;
+    audioDuration = 0;
+    currentTime = 0;
+    playing = false;
+    const t = setTimeout(() => loadWaveSurfer(), 0);
+    return () => clearTimeout(t);
   });
 
   async function loadWaveSurfer(): Promise<void> {
@@ -48,8 +61,6 @@
     try {
       const { default: WaveSurfer } = await import('wavesurfer.js');
       if (!waveContainer) return; // unmounted during async
-      ws?.destroy();
-      wsReady = false;
       const colors = waveColors[theme()] ?? waveColors.dark;
       ws = WaveSurfer.create({
         container: waveContainer,
@@ -60,11 +71,8 @@
         normalize: true,
         interact: true,
         url: src,
-        // Note: no `media` option — WaveSurfer manages its own audio for peak decoding.
-        // Playhead is synced manually via seekTo() in ontimeupdate on the native <audio>.
       });
       ws.on('ready', () => { wsReady = true; });
-      // User clicked waveform to seek — apply to native audio element
       ws.on('interaction', (newTime: number) => {
         if (audioEl) audioEl.currentTime = newTime;
       });
@@ -73,21 +81,6 @@
       console.warn('WaveSurfer failed to load:', err);
     }
   }
-
-  // Reinitialize WaveSurfer when src changes after initial mount
-  let mounted = false;
-  $effect(() => {
-    const _ = src; // track src reactively
-    if (!mounted) { mounted = true; return; } // skip first run — onMount handles it
-    wsReady = false;
-    ws?.destroy();
-    ws = null;
-    audioDuration = 0;
-    currentTime = 0;
-    playing = false;
-    // Delay so audioEl.src updates first
-    setTimeout(() => loadWaveSurfer(), 0);
-  });
 
   // Update waveform colors when theme changes
   $effect(() => {
