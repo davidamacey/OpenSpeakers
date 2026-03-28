@@ -7,11 +7,11 @@
 #
 # All paths below are relative to the directory containing this file (the install root).
 # Expected layout:
-#   ./images/           pre-loaded Docker image tarballs (loaded by install.sh)
-#   ./models/           model weights (vibevoice/, fish-speech/, Qwen/, model_cache/)
-#   ./vibevoice-repo/   VibeVoice Python package source
-#   ./audio_output/     generated audio (created on first run)
-#   ./.env              configured from .env.example
+#   ./images/               pre-loaded Docker image tarballs (loaded by install.sh)
+#   ./model_cache/          HuggingFace + torch cache (populated by download-models.sh)
+#   ./vibevoice-repo/       VibeVoice Python package source (for main worker)
+#   ./audio_output/         generated audio (created on first run)
+#   ./.env                  configured from .env.example
 
 services:
   backend:
@@ -21,25 +21,49 @@ services:
   worker:
     image: open_speakers-worker:latest
     volumes:
-      - ${MODEL_CACHE_DIR:-./models/model_cache}/huggingface:/root/.cache/huggingface
-      - ${MODEL_CACHE_DIR:-./models/model_cache}/torch:/root/.cache/torch
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/home/appuser/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/torch:/home/appuser/.cache/torch
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
-      - ./vibevoice-repo:/opt/vibevoice
-      - ./models:/models
+      - ${VIBEVOICE_REPO_PATH:-./vibevoice-repo}:/opt/vibevoice
     environment:
+      - HF_HOME=/home/appuser/.cache/huggingface
+      - HOME=/home/appuser
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
       - PYTHONPATH=/opt/vibevoice
-      - VIBEVOICE_MODEL_PATH=/models/vibevoice/VibeVoice-Realtime-0.5B
-      - VIBEVOICE_1P5B_MODEL_PATH=/models/vibevoice/VibeVoice-1.5B
+
+  worker-kokoro:
+    image: open_speakers-worker:latest
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/home/appuser/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/torch:/home/appuser/.cache/torch
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - HF_HOME=/home/appuser/.cache/huggingface
+      - HOME=/home/appuser
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
+      - PYTHONPATH=/app
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.kokoro
+      --pool=threads --concurrency=1
+      --max-tasks-per-child=1000
+      --hostname kokoro-worker@%h -E
 
   worker-fish:
     image: open_speakers-worker-fish:latest
     volumes:
-      - ${MODEL_CACHE_DIR:-./models/model_cache}/huggingface:/root/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
-      - ./models:/models
     environment:
       - PYTHONPATH=/app
-      - FISH_SPEECH_MODEL_PATH=/models/fish-speech/s2-pro
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
     command: >
       celery -A app.core.celery worker
@@ -50,17 +74,75 @@ services:
   worker-qwen3:
     image: open_speakers-worker-qwen3:latest
     volumes:
-      - ${MODEL_CACHE_DIR:-./models/model_cache}/huggingface:/root/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
-      - ./models:/models
     environment:
       - PYTHONPATH=/app
-      - QWEN3_TTS_MODEL_PATH=/models/Qwen/Qwen3-TTS
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
     command: >
       celery -A app.core.celery worker
       --loglevel=info -Q tts.qwen3
       --pool=threads --concurrency=1
       --hostname qwen3-worker@%h -E
+
+  worker-f5:
+    image: open_speakers-worker-f5:latest
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - PYTHONPATH=/app:/opt/cosyvoice:/opt/cosyvoice/third_party/Matcha-TTS
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.f5-tts
+      --pool=threads --concurrency=1
+      --hostname f5-worker@%h -E
+
+  worker-orpheus:
+    image: open_speakers-worker-orpheus:latest
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - PYTHONPATH=/app
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.orpheus
+      --pool=threads --concurrency=1
+      --hostname orpheus-worker@%h -E
+
+  worker-dia:
+    image: open_speakers-worker-dia:latest
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/dac:/root/.cache/descript/dac:ro
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - PYTHONPATH=/app
+      - HF_HOME=/root/.cache/huggingface
+      - HF_HUB_OFFLINE=1
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.dia
+      --pool=threads --concurrency=1
+      --hostname dia-worker@%h -E
 
   frontend:
     image: open_speakers-frontend:latest

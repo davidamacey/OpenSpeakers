@@ -17,8 +17,7 @@ with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKi
 ## Key Features
 
 ### Generation
-- **7 working TTS models** — Kokoro 82M, VibeVoice 0.5B/1.5B, Fish Audio S2-Pro, Qwen3 TTS 1.7B, Orpheus 3B, Dia 1.6B
-- **4 registered model stubs** — F5-TTS, Chatterbox, CosyVoice 2.0, Parler TTS (implementations complete; worker-f5 container not yet deployed)
+- **11 working TTS models** — Kokoro 82M, VibeVoice 0.5B/1.5B, Fish Audio S2-Pro, Qwen3 TTS 1.7B, Orpheus 3B, Dia 1.6B, F5-TTS, Chatterbox, CosyVoice 2.0, Parler TTS Mini
 - **GPU hot-swap** — only one model in VRAM at a time; auto-eviction with 60-second idle timer
 - **Ollama-style keep_alive** — per-request `-1` (hold forever), `0` (evict now), or `N` seconds
 - **Real-time audio streaming** — VibeVoice 0.5B streams PCM16 chunks via Redis pub/sub → WebSocket → Web Audio API
@@ -58,17 +57,17 @@ with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKi
 
 | Model | Container | Queue | VRAM | Cloning | Streaming | Status |
 |-------|-----------|-------|------|---------|-----------|--------|
-| **Kokoro 82M** | `worker` | `tts` | ~0.5 GB | — | — | Working (standby) |
-| **VibeVoice 0.5B** | `worker` | `tts` | ~5 GB | — | PCM16 | Working |
-| **VibeVoice 1.5B** | `worker` | `tts` | ~12 GB | Zero-shot | — | Working |
-| **Fish Audio S2-Pro** | `worker-fish` | `tts.fish-speech` | ~22 GB | Zero-shot | Chunked | Working |
-| **Qwen3 TTS 1.7B** | `worker-qwen3` | `tts.qwen3` | ~10 GB | Zero-shot | — | Working |
-| **Orpheus 3B** | `worker-orpheus` | `tts.orpheus` | ~7 GB | — | — | Working |
-| **Dia 1.6B** | `worker-dia` | `tts.dia` | ~10 GB | Via prompt | — | Working |
-| **F5-TTS** | `worker-f5` | `tts.f5-tts` | ~3 GB | Zero-shot | — | Stub (not deployed) |
-| **Chatterbox** | `worker-f5` | `tts.f5-tts` | ~5 GB | Zero-shot | — | Stub (not deployed) |
-| **CosyVoice 2.0** | `worker-f5` | `tts.f5-tts` | ~5 GB | Zero-shot | — | Stub (not deployed) |
-| **Parler TTS Mini** | `worker-f5` | `tts.f5-tts` | ~3 GB | — | — | Stub (not deployed) |
+| **Kokoro 82M** | `worker-kokoro` | `tts.kokoro` | ~0.5 GB | — | — | ✅ Working (standby) |
+| **VibeVoice 0.5B** | `worker` | `tts` | ~5 GB | — | PCM16 | ✅ Working |
+| **VibeVoice 1.5B** | `worker` | `tts` | ~12 GB | Zero-shot | — | ✅ Working |
+| **Fish Audio S2-Pro** | `worker-fish` | `tts.fish-speech` | ~22 GB | Zero-shot | Chunked | ✅ Working |
+| **Qwen3 TTS 1.7B** | `worker-qwen3` | `tts.qwen3` | ~10 GB | Zero-shot | — | ✅ Working |
+| **Orpheus 3B** | `worker-orpheus` | `tts.orpheus` | ~7 GB | — | — | ✅ Working |
+| **Dia 1.6B** | `worker-dia` | `tts.dia` | ~10 GB | Via prompt | — | ✅ Working |
+| **F5-TTS** | `worker-f5` | `tts.f5-tts` | ~3 GB | Zero-shot | — | ✅ Working |
+| **Chatterbox** | `worker-f5` | `tts.f5-tts` | ~5 GB | Zero-shot | — | ✅ Working |
+| **CosyVoice 2.0** | `worker-f5` | `tts.f5-tts` | ~5 GB | Zero-shot | — | ✅ Working |
+| **Parler TTS Mini** | `worker-f5` | `tts.f5-tts` | ~3 GB | — | — | ✅ Working |
 
 ---
 
@@ -90,6 +89,12 @@ cd OpenSpeakers
 # Copy and edit the environment file
 cp .env.example .env
 # Edit .env: set HF_TOKEN if you want Orpheus 3B (gated model)
+
+# Download all model weights into local cache (~120 GB total)
+# This only needs to run once; workers use HF_HUB_OFFLINE=1 after this
+./scripts/download-models.sh
+# or download specific models only:
+# ./scripts/download-models.sh --models kokoro,f5-tts,chatterbox
 
 # Build the shared GPU base image first
 docker build --network=host -t open_speakers-gpu-base:latest \
@@ -304,12 +309,13 @@ memory, Python dependencies, and container build complexity.
 
 | Container | Queue | Models | Dockerfile |
 |-----------|-------|--------|------------|
-| `worker` | `tts` | Kokoro 82M, VibeVoice 0.5B, VibeVoice 1.5B | `Dockerfile.worker` |
+| `worker-kokoro` | `tts.kokoro` | Kokoro 82M (standby — always loaded) | `Dockerfile.worker` |
+| `worker` | `tts` | VibeVoice 0.5B (streaming), VibeVoice 1.5B | `Dockerfile.worker` |
 | `worker-fish` | `tts.fish-speech` | Fish Audio S2-Pro | `Dockerfile.worker-fish` |
 | `worker-qwen3` | `tts.qwen3` | Qwen3 TTS 1.7B | `Dockerfile.worker-qwen3` |
 | `worker-orpheus` | `tts.orpheus` | Orpheus 3B | `Dockerfile.worker-orpheus` |
 | `worker-dia` | `tts.dia` | Dia 1.6B | `Dockerfile.worker-dia` |
-| `worker-f5` | `tts.f5-tts` | F5-TTS, Chatterbox, CosyVoice 2.0, Parler TTS | `Dockerfile.worker-f5` |
+| `worker-f5` | `tts.f5-tts` | F5-TTS, Chatterbox, CosyVoice 2.0, Parler TTS Mini | `Dockerfile.worker-f5` |
 
 The FastAPI backend **never touches the GPU**. Only Celery workers load ML models. Queue
 routing is the single source of truth in `QUEUE_MAP` in `backend/app/api/endpoints/tts.py`.
@@ -364,7 +370,8 @@ open_speakers/
 │   ├── PLAN.md                      # Feature roadmap and implementation status
 │   └── MARKET_RESEARCH.md           # Competitor analysis
 ├── scripts/
-│   ├── test_all_models.py           # Smoke-test all deployed models
+│   ├── test_all_models.py           # Smoke-test all deployed models sequentially
+│   ├── download-models.sh           # Download all model weights from HuggingFace
 │   └── package-offline.sh           # Air-gapped install packaging
 ├── openspeakers.sh                  # Management CLI
 ├── docker-compose.yml               # Base service definitions
@@ -449,6 +456,62 @@ docker compose exec worker python scripts/test_all_models.py
 | Queue | Celery 5 + Redis (concurrency=1 per worker for GPU serialisation) |
 | Database | PostgreSQL |
 | GPU | NVIDIA CUDA 12.8, PyTorch 2.10+cu128 |
+
+---
+
+## Offline / Air-Gapped Installation
+
+To install OpenSpeakers on a machine without internet access:
+
+```bash
+# On the SOURCE machine (with internet):
+
+# 1. Download all model weights
+./scripts/download-models.sh
+
+# 2. Build Docker images and package everything
+./scripts/package-offline.sh
+
+# The package is created at ./dist/openspeakers-offline-YYYYMMDD/
+# Transfer it to the target machine:
+rsync -avz --progress dist/openspeakers-offline-YYYYMMDD/ user@target:/opt/openspeakers/
+```
+
+```bash
+# On the TARGET machine (no internet required):
+cd /opt/openspeakers
+./install.sh
+```
+
+`install.sh` will:
+1. Check Docker + NVIDIA runtime prerequisites
+2. Load all Docker images from `images/*.tar.gz`
+3. Create `.env` from the example template
+4. Start all services with `docker compose up -d`
+5. Run Alembic database migrations
+
+---
+
+## Model Downloads
+
+To download individual models or refresh the local cache:
+
+```bash
+# Download all 11 models (~120 GB total)
+./scripts/download-models.sh
+
+# Download specific models
+./scripts/download-models.sh --models kokoro,f5-tts,chatterbox
+
+# Download to a custom cache directory
+./scripts/download-models.sh --cache-dir /mnt/nas/model_cache
+
+# For gated models (Orpheus 3B requires HF account acceptance)
+HF_TOKEN=your_token ./scripts/download-models.sh --models orpheus-3b
+```
+
+Available model IDs: `kokoro`, `vibevoice`, `vibevoice-1.5b`, `fish-speech-s2`, `qwen3-tts`,
+`f5-tts`, `f5-tts-vocos`, `chatterbox`, `cosyvoice-2`, `parler-tts`, `orpheus-3b`, `dia-1b`
 
 ---
 

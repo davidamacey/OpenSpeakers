@@ -38,7 +38,6 @@ COPY_VIBEVOICE_REPO=true
 DRY_RUN=false
 SKIP_IMAGES=()
 
-NAS_MODELS=/mnt/nas/models
 VIBEVOICE_REPO=/mnt/nvm/repos/VibeVoice
 
 # Docker images to save: "tag|output_filename"
@@ -47,6 +46,9 @@ declare -A IMAGES=(
   ["open_speakers-worker:latest"]="worker"
   ["open_speakers-worker-fish:latest"]="worker-fish"
   ["open_speakers-worker-qwen3:latest"]="worker-qwen3"
+  ["open_speakers-worker-f5:latest"]="worker-f5"
+  ["open_speakers-worker-orpheus:latest"]="worker-orpheus"
+  ["open_speakers-worker-dia:latest"]="worker-dia"
   ["open_speakers-frontend:latest"]="frontend"
   ["postgres:17.5-alpine"]="postgres"
   ["redis:8.2.2-alpine3.22"]="redis"
@@ -195,51 +197,25 @@ success "Saved $total_images image(s)."
 if $COPY_MODELS; then
   hr
   info "Copying model weights..."
+  info "Source: $REPO_DIR/model_cache (HF hub cache populated by download-models.sh)"
+  info "Tip: Run ./scripts/download-models.sh first if cache is empty."
 
-  # VibeVoice model weights (0.5B + 1.5B only — skip ASR, Large)
-  if [[ -d "$NAS_MODELS/vibevoice" ]]; then
-    info "  VibeVoice weights (VibeVoice-Realtime-0.5B + VibeVoice-1.5B)..."
-    run rsync -a --info=progress2 \
-      --exclude='VibeVoice-ASR' \
-      --exclude='VibeVoice-Large' \
-      --exclude='MANIFEST.md' \
-      "$NAS_MODELS/vibevoice/" \
-      "$OUTPUT_DIR/models/vibevoice/"
-  else
-    warn "  NAS vibevoice models not found at $NAS_MODELS/vibevoice — skipping"
-  fi
-
-  # Fish Speech S2-Pro weights
-  if [[ -d "$NAS_MODELS/fish-speech" ]]; then
-    info "  Fish Speech weights..."
-    run rsync -a --info=progress2 \
-      "$NAS_MODELS/fish-speech/" \
-      "$OUTPUT_DIR/models/fish-speech/"
-  else
-    warn "  NAS fish-speech models not found at $NAS_MODELS/fish-speech — skipping"
-  fi
-
-  # Qwen3 TTS weights
-  if [[ -d "$NAS_MODELS/Qwen" ]]; then
-    info "  Qwen3 TTS weights..."
-    run rsync -a --info=progress2 \
-      "$NAS_MODELS/Qwen/" \
-      "$OUTPUT_DIR/models/Qwen/"
-  else
-    warn "  NAS Qwen models not found at $NAS_MODELS/Qwen — skipping"
-  fi
-
-  # Local model_cache (Kokoro HF cache, torch cache)
+  # Copy the full HF hub cache — all models land here via snapshot_download
   if [[ -d "$REPO_DIR/model_cache" ]]; then
-    info "  Local model_cache (Kokoro / HF cache)..."
+    info "  Copying HF model cache (all models)..."
     run rsync -a --info=progress2 \
+      --exclude='*.lock' \
+      --exclude='tmp*' \
       "$REPO_DIR/model_cache/" \
-      "$OUTPUT_DIR/models/model_cache/"
+      "$OUTPUT_DIR/model_cache/"
+    success "  HF cache copied."
   else
-    warn "  model_cache not found at $REPO_DIR/model_cache — skipping"
+    warn "  model_cache not found at $REPO_DIR/model_cache"
+    warn "  Run: ./scripts/download-models.sh"
+    warn "  Workers will attempt HF downloads on first run (requires internet)"
   fi
 
-  success "Model weights copied."
+  success "Model weights done."
 fi
 
 # ── Copy VibeVoice Python source repo ─────────────────────────────────────────
@@ -343,12 +319,9 @@ if [[ ! -f .env ]]; then
   info "Creating .env from .env.example..."
   cp .env.example .env
 
-  # Patch paths to use local model dirs (absolute paths for clarity)
-  sed -i "s|^MODEL_CACHE_DIR=.*|MODEL_CACHE_DIR=${SCRIPT_DIR}/models/model_cache|" .env
+  # Patch paths to use local model cache (HF hub cache populated by download-models.sh)
+  sed -i "s|^MODEL_CACHE_DIR=.*|MODEL_CACHE_DIR=${SCRIPT_DIR}/model_cache|" .env
   sed -i "s|^AUDIO_OUTPUT_DIR=.*|AUDIO_OUTPUT_DIR=${SCRIPT_DIR}/audio_output|" .env
-  sed -i "s|^VIBEVOICE_MODEL_PATH=.*|VIBEVOICE_MODEL_PATH=${SCRIPT_DIR}/models/vibevoice/VibeVoice-Realtime-0.5B|" .env
-  sed -i "s|^FISH_SPEECH_MODEL_PATH=.*|FISH_SPEECH_MODEL_PATH=${SCRIPT_DIR}/models/fish-speech/s2-pro|" .env
-  sed -i "s|^QWEN3_TTS_MODEL_PATH=.*|QWEN3_TTS_MODEL_PATH=${SCRIPT_DIR}/models/Qwen/Qwen3-TTS|" .env
 
   warn "Review .env and set POSTGRES_PASSWORD and SECRET_KEY before production use."
 else
@@ -417,7 +390,8 @@ if ! $DRY_RUN; then
   echo
   info "Contents:"
   echo "  images/        $(ls "$OUTPUT_DIR/images/" 2>/dev/null | wc -l) image tarballs"
-  echo "  models/        $(du -sh "$OUTPUT_DIR/models/" 2>/dev/null | cut -f1)"
+  [[ -d "$OUTPUT_DIR/model_cache" ]] && \
+  echo "  model_cache/   $(du -sh "$OUTPUT_DIR/model_cache/" 2>/dev/null | cut -f1) (HF model weights)"
   [[ -d "$OUTPUT_DIR/vibevoice-repo" ]] && \
   echo "  vibevoice-repo $(du -sh "$OUTPUT_DIR/vibevoice-repo/" 2>/dev/null | cut -f1)"
   echo "  configs/       models.yaml, presets.yaml"
