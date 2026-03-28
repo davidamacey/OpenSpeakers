@@ -22,6 +22,7 @@
   let currentTime = $state(0);
   let wsDuration = $state(0);
   let ready = $state(false);
+  let loadError = $state(false);
 
   const waveColors = {
     dark: { wave: '#6366f1', progress: '#a5b4fc', cursor: '#e0e7ff' },
@@ -46,6 +47,7 @@
     if (!container || !src || !WaveSurfer) return;
     ws?.destroy();
     ready = false;
+    loadError = false;
     playing = false;
     currentTime = 0;
     wsDuration = 0;
@@ -58,6 +60,7 @@
       cursorColor: colors.cursor,
       height: 64,
       normalize: true,
+      backend: 'MediaElement',  // uses <audio> internally — more compatible than WebAudio
       url: src,
     });
 
@@ -70,6 +73,10 @@
     ws.on('play', () => { playing = true; });
     ws.on('pause', () => { playing = false; });
     ws.on('finish', () => { playing = false; currentTime = 0; });
+    ws.on('error', (err: Error) => {
+      console.error('WaveSurfer error:', err);
+      loadError = true;
+    });
   }
 
   // Re-init when src changes
@@ -124,21 +131,23 @@
 <div class="space-y-2">
   {#if src}
     <!-- WaveSurfer container — primary keyboard target -->
-    <div
-      bind:this={container}
-      class="w-full rounded-lg overflow-hidden cursor-pointer
-             {!ready ? 'opacity-50' : ''}"
-      role="application"
-      aria-label="Audio waveform. Space to play/pause, arrow keys to seek ±5s"
-      onkeydown={handleKeydown}
-      tabindex={0}
-    ></div>
+    {#if !loadError}
+      <div
+        bind:this={container}
+        class="w-full rounded-lg overflow-hidden cursor-pointer
+               {!ready ? 'opacity-50' : ''}"
+        role="application"
+        aria-label="Audio waveform. Space to play/pause, arrow keys to seek ±5s"
+        onkeydown={handleKeydown}
+        tabindex={0}
+      ></div>
+    {/if}
 
     <div class="flex items-center gap-3">
       <!-- Play/Pause button -->
       <button
         onclick={toggle}
-        {disabled}
+        disabled={disabled || (!ready && !loadError)}
         class="flex-shrink-0 w-9 h-9 flex items-center justify-center rounded-full
                bg-primary-600 hover:bg-primary-700 disabled:opacity-50 disabled:cursor-not-allowed
                text-white transition-colors"
@@ -157,9 +166,11 @@
         {/if}
       </button>
 
-      <!-- Keyboard seek hint -->
+      <!-- Keyboard seek hint / status -->
       <div class="flex-1 text-xs text-gray-500 dark:text-gray-500">
-        {#if !ready && src}
+        {#if loadError}
+          <audio controls src={src} class="h-8 w-full max-w-xs"></audio>
+        {:else if !ready && src}
           <span class="text-xs text-gray-400 dark:text-gray-600">Loading waveform...</span>
         {:else}
           <span class="text-xs text-gray-500 dark:text-gray-600">Click waveform to seek · ←/→ ±5s · Space to play</span>

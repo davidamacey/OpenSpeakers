@@ -26,8 +26,8 @@ KOKORO_VOICES: dict[str, str] = {
     "en-male-2": "bm_george",  # British English male
     "fr-female-1": "ff_siwis",  # French female
     "ja-female-1": "jf_alpha",  # Japanese female
-    "ko-female-1": "kf_alpha",  # Korean female
-    "zh-female-1": "zf_xiaobai",  # Chinese female
+    # Note: no native Korean voices in hexgrad/Kokoro-82M; ko is handled via pipeline fallback
+    "zh-female-1": "zf_xiaobei",  # Chinese female (xiaobei, not xiaobai)
 }
 
 DEFAULT_VOICE = "en-female-1"

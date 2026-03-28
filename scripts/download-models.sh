@@ -89,6 +89,31 @@ print(f"  → {path}")
 PYEOF
 }
 
+download_kokoro_voices() {
+  # Kokoro voices are fetched lazily by the library (hf_hub_download per voice).
+  # snapshot_download only gets the main model files, so we download all 54 voices
+  # explicitly here so the worker can run with HF_HUB_OFFLINE=1.
+  if $DRY_RUN; then
+    echo -e "${YELLOW}[dry-run]${NC} Would download all Kokoro voice .pt files"
+    return
+  fi
+
+  info "  Downloading all Kokoro voice files (54 voices)..."
+  HF_HOME="$CACHE_DIR" python3 - <<'PYEOF'
+import os
+from huggingface_hub import hf_hub_download, list_repo_files
+voices = [f for f in list_repo_files("hexgrad/Kokoro-82M") if f.startswith("voices/") and f.endswith(".pt")]
+ok = 0
+for v in sorted(voices):
+    try:
+        hf_hub_download(repo_id="hexgrad/Kokoro-82M", filename=v)
+        ok += 1
+    except Exception as e:
+        print(f"    WARNING: failed to download {v}: {e}")
+print(f"  → {ok}/{len(voices)} voices cached")
+PYEOF
+}
+
 # ── Check Python + huggingface_hub ────────────────────────────────────────────
 if ! python3 -c "import huggingface_hub" 2>/dev/null; then
   error "huggingface_hub not installed. Run: pip3 install huggingface_hub --break-system-packages"
@@ -157,6 +182,10 @@ for entry in "${MODELS[@]}"; do
   info "  repo: $hf_repo"
 
   if download_hf "$hf_repo" "$requires_token"; then
+    # Kokoro: also download all 54 voice .pt files (fetched lazily by the library)
+    if [[ "$model_id" == "kokoro" ]]; then
+      download_kokoro_voices
+    fi
     success "  ✓ $model_id done"
     downloaded=$((downloaded + 1))
   else

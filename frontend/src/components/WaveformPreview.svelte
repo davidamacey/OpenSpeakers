@@ -17,6 +17,7 @@
       height,
       normalize: true,
       interact: false,
+      backend: 'MediaElement',  // more compatible than WebAudio; no full decode required
       url: src,
     });
   });
