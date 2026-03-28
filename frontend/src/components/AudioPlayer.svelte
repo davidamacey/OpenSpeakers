@@ -1,5 +1,5 @@
 <script lang="ts">
-  import { onMount } from 'svelte';
+  import { onMount, tick } from 'svelte';
   import { theme } from '$stores/theme';
 
   let {
@@ -23,7 +23,7 @@
   let currentTime = $state(0);
   let audioDuration = $state(0);
 
-  // WaveSurfer instance — linked to audioEl via `media` option for automatic playhead sync
+  // WaveSurfer instance — visual waveform only; playhead synced manually via seekTo()
   let ws: import('wavesurfer.js').default | null = null;
   let wsReady = $state(false);
 
@@ -34,16 +34,20 @@
   };
 
   onMount(() => {
-    if (autoplay && audioEl && src) audioEl.play().catch(() => {});
-    loadWaveSurfer();
+    // Use IIFE so the cleanup function is returned synchronously while init is async
+    (async () => {
+      await tick(); // ensure bind:this bindings are resolved before accessing audioEl
+      if (autoplay && audioEl && src) audioEl.play().catch(() => {});
+      await loadWaveSurfer();
+    })();
     return () => { ws?.destroy(); ws = null; };
   });
 
   async function loadWaveSurfer(): Promise<void> {
-    if (!src || !waveContainer || !audioEl) return;
+    if (!src || !waveContainer) return;
     try {
       const { default: WaveSurfer } = await import('wavesurfer.js');
-      if (!waveContainer || !audioEl) return; // unmounted during async
+      if (!waveContainer) return; // unmounted during async
       ws?.destroy();
       wsReady = false;
       const colors = waveColors[theme()] ?? waveColors.dark;
@@ -54,11 +58,16 @@
         cursorColor: colors.cursor,
         height: 64,
         normalize: true,
-        // Pass the existing <audio> element — WaveSurfer v7 syncs the playhead automatically
-        media: audioEl,
+        interact: true,
         url: src,
+        // Note: no `media` option — WaveSurfer manages its own audio for peak decoding.
+        // Playhead is synced manually via seekTo() in ontimeupdate on the native <audio>.
       });
       ws.on('ready', () => { wsReady = true; });
+      // User clicked waveform to seek — apply to native audio element
+      ws.on('interaction', (newTime: number) => {
+        if (audioEl) audioEl.currentTime = newTime;
+      });
       ws.on('error', (err: Error) => { console.warn('WaveSurfer:', err.message); });
     } catch (err) {
       console.warn('WaveSurfer failed to load:', err);
@@ -68,7 +77,7 @@
   // Reinitialize WaveSurfer when src changes after initial mount
   let mounted = false;
   $effect(() => {
-    const newSrc = src; // track src reactively
+    const _ = src; // track src reactively
     if (!mounted) { mounted = true; return; } // skip first run — onMount handles it
     wsReady = false;
     ws?.destroy();
@@ -122,26 +131,32 @@
       bind:this={audioEl}
       {src}
       onloadedmetadata={() => { audioDuration = audioEl?.duration ?? 0; }}
-      ontimeupdate={() => { currentTime = audioEl?.currentTime ?? 0; }}
+      ontimeupdate={() => {
+        currentTime = audioEl?.currentTime ?? 0;
+        // Sync WaveSurfer playhead — seekTo(0–1 progress) updates the visual cursor
+        if (ws && wsReady && audioDuration > 0) ws.seekTo(currentTime / audioDuration);
+      }}
       onplay={() => { playing = true; }}
       onpause={() => { playing = false; }}
-      onended={() => { playing = false; currentTime = 0; }}
+      onended={() => { playing = false; currentTime = 0; if (ws && wsReady) ws.seekTo(0); }}
       class="hidden"
     ></audio>
 
-    <!-- WaveSurfer waveform — linked to audioEl, playhead auto-syncs -->
-    <div
-      bind:this={waveContainer}
-      class="w-full rounded-lg overflow-hidden cursor-pointer
-             {!wsReady ? 'min-h-[64px] bg-gray-800/40' : ''}"
-      role="button"
-      tabindex={0}
-      aria-label="Audio waveform — click to seek, Space to play/pause"
-      onkeydown={handleKeydown}
-      onclick={toggle}
-    >
+    <!-- Waveform area: overlay keeps loading state above WaveSurfer's canvas -->
+    <div class="relative w-full">
+      <!-- WaveSurfer renders into this div — always in DOM so it can measure width -->
+      <!-- svelte-ignore a11y_no_noninteractive_element_interactions a11y_no_noninteractive_tabindex -->
+      <div
+        bind:this={waveContainer}
+        class="w-full min-h-[64px] rounded-lg overflow-hidden cursor-pointer"
+        role="application"
+        tabindex={0}
+        aria-label="Audio waveform — click to seek, ←/→ ±5s, Space to play/pause"
+        onkeydown={handleKeydown}
+      ></div>
+      <!-- Loading overlay sits on top until WaveSurfer fires 'ready' -->
       {#if !wsReady}
-        <div class="h-16 flex items-center px-4">
+        <div class="absolute inset-0 flex items-center px-4 rounded-lg bg-gray-800/40 pointer-events-none">
           <div class="w-full h-6 rounded bg-gray-700/50 animate-pulse"></div>
         </div>
       {/if}
@@ -169,7 +184,7 @@
       </button>
 
       <!-- Hint -->
-      <span class="flex-1 text-xs text-gray-600 dark:text-gray-600">
+      <span class="flex-1 text-xs text-gray-500 dark:text-gray-400">
         {#if wsReady}Click waveform to seek · ←/→ ±5s{:else}Loading waveform…{/if}
       </span>
 
