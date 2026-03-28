@@ -71,7 +71,7 @@
 #   - docker compose (v2) is required — the old docker-compose (v1) is not supported.
 #   - Run 'start build' on first use or after Dockerfile changes to build images.
 #   - The GPU base image must be built before any worker images:
-#       docker build --network=host -t open_speakers-gpu-base:latest \
+#       docker build -t open_speakers-gpu-base:latest \
 #         -f backend/Dockerfile.base-gpu backend/
 #
 # =============================================================================

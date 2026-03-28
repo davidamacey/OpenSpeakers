@@ -2,7 +2,7 @@
 # (the main worker pins transformers 4.51.3 for VibeVoice compatibility)
 #
 # Build base first:
-#   docker build --network=host -t open_speakers-gpu-base:latest \
+#   docker build -t open_speakers-gpu-base:latest \
 #     -f Dockerfile.base-gpu .
 
 FROM open_speakers-gpu-base:latest

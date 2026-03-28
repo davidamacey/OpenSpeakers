@@ -8,7 +8,7 @@
 # flash-attn should install it individually; all models fall back to sdpa gracefully.
 #
 # Build:
-#   docker build --network=host -t open_speakers-gpu-base:latest \
+#   docker build -t open_speakers-gpu-base:latest \
 #     -f backend/Dockerfile.base-gpu backend/
 #
 # Usage in secondary worker Dockerfiles:

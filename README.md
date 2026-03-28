@@ -95,7 +95,7 @@ cp .env.example .env
 # Download specific models only: --models kokoro,f5-tts,chatterbox
 
 # Build the shared GPU base image (first run only)
-docker build --network=host -t open_speakers-gpu-base:latest \
+docker build -t open_speakers-gpu-base:latest \
   -f backend/Dockerfile.base-gpu backend/
 
 # Build and start — database migrations run automatically on backend startup
