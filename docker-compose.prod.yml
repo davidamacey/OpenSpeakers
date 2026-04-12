@@ -1,0 +1,336 @@
+# OpenSpeakers Production Compose — pulls pre-built images from Docker Hub.
+#
+# Quick start:
+#   curl -fsSL https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/scripts/install.sh | bash
+#
+# Or manually:
+#   mkdir openspeakers && cd openspeakers
+#   curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/docker-compose.prod.yml
+#   curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/docker-compose.gpu.yml
+#   curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/.env.example
+#   cp .env.example .env
+#   docker compose -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d
+
+services:
+  postgres:
+    container_name: open_speakers-postgres
+    image: postgres:17.5-alpine
+    restart: always
+    environment:
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - postgres_data:/var/lib/postgresql/data/
+    ports:
+      - "127.0.0.1:${POSTGRES_PORT:-5432}:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-openspeakers}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    container_name: open_speakers-redis
+    image: redis:8.2.2-alpine3.22
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "127.0.0.1:${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    container_name: open_speakers-backend
+    image: davidamacey/openspeakers-backend:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    volumes:
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    ports:
+      - "${BACKEND_PORT:-8080}:8080"
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - NVIDIA_VISIBLE_DEVICES=${GPU_DEVICE_ID:-0}
+      - NVIDIA_DRIVER_CAPABILITIES=utility
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
+  worker:
+    container_name: open_speakers-worker
+    image: davidamacey/openspeakers-worker:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts
+      --pool=threads --concurrency=1
+      --max-tasks-per-child=1000
+      --hostname tts-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/home/appuser/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/torch:/home/appuser/.cache/torch
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - HF_HOME=/home/appuser/.cache/huggingface
+      - HOME=/home/appuser
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d tts-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker-kokoro:
+    container_name: open_speakers-worker-kokoro
+    image: davidamacey/openspeakers-worker:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.kokoro
+      --pool=threads --concurrency=1
+      --max-tasks-per-child=1000
+      --hostname kokoro-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/home/appuser/.cache/huggingface
+      - ${MODEL_CACHE_DIR:-./model_cache}/torch:/home/appuser/.cache/torch
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - HF_HOME=/home/appuser/.cache/huggingface
+      - HOME=/home/appuser
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - USER=appuser
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d kokoro-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker-fish:
+    container_name: open_speakers-worker-fish
+    image: davidamacey/openspeakers-worker-fish:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.fish-speech
+      --pool=threads --concurrency=1
+      --hostname fish-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d fish-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker-qwen3:
+    container_name: open_speakers-worker-qwen3
+    image: davidamacey/openspeakers-worker-qwen3:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.qwen3
+      --pool=threads --concurrency=1
+      --hostname qwen3-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d qwen3-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker-f5:
+    container_name: open_speakers-worker-f5
+    image: davidamacey/openspeakers-worker-f5:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.f5-tts
+      --pool=threads --concurrency=1
+      --hostname f5-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - PYTHONPATH=/app:/opt/cosyvoice:/opt/cosyvoice/third_party/Matcha-TTS
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d f5-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker-orpheus:
+    container_name: open_speakers-worker-orpheus
+    image: davidamacey/openspeakers-worker-orpheus:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    shm_size: '2gb'
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.orpheus
+      --pool=threads --concurrency=1
+      --hostname orpheus-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d orpheus-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  worker-dia:
+    container_name: open_speakers-worker-dia
+    image: davidamacey/openspeakers-worker-dia:${VERSION:-latest}
+    runtime: nvidia
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info -Q tts.dia
+      --pool=threads --concurrency=1
+      --hostname dia-worker@%h -E
+    volumes:
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/root/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - REDIS_HOST=redis
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+      - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - NVIDIA_VISIBLE_DEVICES=all
+      - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d dia-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 120s
+    depends_on:
+      backend:
+        condition: service_healthy
+
+  frontend:
+    container_name: open_speakers-frontend
+    image: davidamacey/openspeakers-frontend:${VERSION:-latest}
+    restart: always
+    security_opt:
+      - no-new-privileges:true
+    ports:
+      - "${FRONTEND_PORT:-5200}:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
+
+networks:
+  default:
+    driver: bridge

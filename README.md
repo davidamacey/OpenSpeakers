@@ -88,46 +88,64 @@ with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKi
 
 ## Quick Start
 
-### Prerequisites
-
-- Docker and Docker Compose v2
-- NVIDIA GPU with >= 8 GB VRAM (48 GB A6000 recommended for larger models)
-- NVIDIA Container Toolkit (`nvidia-docker2`)
-
-### Setup
+### One-Line Install
 
 ```bash
-# Clone the repo
+curl -fsSL https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/scripts/install.sh | bash
+```
+
+This downloads the compose files, pulls all images from Docker Hub, and starts the app. That's it.
+
+**Requirements:** Docker with Compose v2, NVIDIA GPU, [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
+
+Once running:
+- **UI:** http://localhost:5200
+- **API:** http://localhost:8080
+- **Docs:** http://localhost:8080/docs
+
+Models download automatically on first use (~1-22 GB each depending on the model).
+
+### Manual Install (from Docker Hub)
+
+```bash
+mkdir openspeakers && cd openspeakers
+curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/docker-compose.prod.yml
+curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/docker-compose.gpu.yml
+curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/.env.example
+cp .env.example .env
+docker compose -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d
+```
+
+### Development Setup (from source)
+
+```bash
 git clone https://github.com/davidamacey/OpenSpeakers.git
 cd OpenSpeakers
-
-# Copy environment file (COMPOSE_FILE is pre-configured inside)
 cp .env.example .env
-# Optional: set HF_TOKEN in .env if you want Orpheus 3B (gated model)
-
-# Download all model weights (~120 GB total) — only needed once
-./scripts/download-models.sh
-# Download specific models only: --models kokoro,f5-tts,chatterbox
-
-# Build the shared GPU base image (first run only)
-docker build -t open_speakers-gpu-base:latest \
-  -f backend/Dockerfile.base-gpu backend/
-
-# Build and start — database migrations run automatically on backend startup
 docker compose up -d --build
 ```
 
-Frontend: **http://localhost:5200**
-Backend API: **http://localhost:8080**
-Swagger UI: **http://localhost:8080/docs**
+### Configuration
+
+Edit `.env` to customize:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `GPU_DEVICE_ID` | `0` | Which CUDA GPU to use |
+| `FRONTEND_PORT` | `5200` | UI port |
+| `BACKEND_PORT` | `8080` | API port |
+| `HF_TOKEN` | — | Required for gated models (Orpheus 3B) |
+| `MODEL_CACHE_DIR` | `./model_cache` | Where model weights are stored |
+| `AUDIO_OUTPUT_DIR` | `./audio_output` | Where generated audio is saved |
 
 ### First Use
 
-1. Open the **Models** page (`/models`) to see all available models and their capabilities
-2. Go to **TTS** (`/tts`), select a model, enter text, and click **Generate**
-3. Use the **Clone** page (`/clone`) to upload a reference audio clip and create a voice profile
-4. Use the **Batch** page (`/batch`) to generate multiple lines at once
-5. Use the **Compare** page (`/compare`) to run the same text through multiple models side-by-side
+1. Open **http://localhost:5200** — the TTS page loads automatically
+2. Select a model (Kokoro is fastest for a first test), enter text, click **Generate**
+3. Browse **Models** to see all 11 models with help text on speed, quality, and use cases
+4. Try **Batch** to generate multiple lines at once
+5. Try **Compare** to hear the same text across different models side-by-side
+6. Use **Clone** to upload a reference audio clip and create a custom voice
 
 ---
 
