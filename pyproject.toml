@@ -5,8 +5,9 @@ name = "open-speakers"
 version = "0.1.0"
 description = "Unified TTS and voice cloning with multiple open-source models and hot-swap GPU management"
 authors = [
-    {name = "OpenSpeakers Contributors"}
+    {name = "Attevon LLC", email = "hello@attevon.com"}
 ]
+license = {text = "AGPL-3.0-only"}
 requires-python = ">=3.11"
 
 [tool.ruff]

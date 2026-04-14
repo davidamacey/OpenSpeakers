@@ -12,6 +12,11 @@
 A unified, self-hosted TTS and voice cloning application supporting 11 open-source models
 with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKit UI.
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-blue.svg)](LICENSE)
+
+> Copyright © 2026 [Attevon LLC](https://attevon.com). All rights reserved.
+> Released under the [GNU Affero General Public License v3.0](LICENSE).
+
 ---
 
 ## Screenshots

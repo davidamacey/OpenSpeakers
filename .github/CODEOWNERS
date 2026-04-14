@@ -1,0 +1,5 @@
+# CODEOWNERS — OpenSpeakers
+# All changes require review from an Attevon LLC maintainer.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+* @davidamacey
