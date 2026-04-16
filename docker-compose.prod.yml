@@ -67,6 +67,8 @@ services:
       - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - REDIS_PORT=6379
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - NVIDIA_VISIBLE_DEVICES=${GPU_DEVICE_ID:-0}
@@ -103,6 +105,8 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - HF_HOME=/home/appuser/.cache/huggingface
@@ -139,6 +143,8 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - HF_HOME=/home/appuser/.cache/huggingface
@@ -173,10 +179,14 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - HF_HOME=/root/.cache/huggingface
+      - HOME=/root
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d fish-worker@$$HOSTNAME"]
       interval: 30s
@@ -205,9 +215,13 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - HF_HOME=/root/.cache/huggingface
+      - HOME=/root
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d qwen3-worker@$$HOSTNAME"]
       interval: 30s
@@ -237,9 +251,13 @@ services:
       - PYTHONPATH=/app:/opt/cosyvoice:/opt/cosyvoice/third_party/Matcha-TTS
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - HF_HOME=/root/.cache/huggingface
+      - HOME=/root
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d f5-worker@$$HOSTNAME"]
       interval: 30s
@@ -269,9 +287,13 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
+      - HF_HOME=/root/.cache/huggingface
+      - HOME=/root
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d orpheus-worker@$$HOSTNAME"]
       interval: 30s
@@ -300,11 +322,15 @@ services:
     environment:
       - POSTGRES_HOST=postgres
       - REDIS_HOST=redis
+      - CELERY_BROKER_URL=redis://redis:6379/0
+      - CELERY_RESULT_BACKEND=redis://redis:6379/1
       - AUDIO_OUTPUT_DIR=/app/audio_output
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - NVIDIA_VISIBLE_DEVICES=all
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
+      - HF_HOME=/root/.cache/huggingface
+      - HOME=/root
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d dia-worker@$$HOSTNAME"]
       interval: 30s
@@ -322,7 +348,7 @@ services:
     security_opt:
       - no-new-privileges:true
     ports:
-      - "${FRONTEND_PORT:-5200}:3000"
+      - "${FRONTEND_PORT:-5200}:80"
     depends_on:
       backend:
         condition: service_healthy

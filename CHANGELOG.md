@@ -5,6 +5,25 @@ All notable changes to OpenSpeakers are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [0.1.1] - 2026-04-15
+
+### Fixed
+
+- **Frontend unreachable**: `docker-compose.prod.yml` mapped the frontend to internal port 3000,
+  but the nginx container listens on port 80. Fixed to `${FRONTEND_PORT:-5200}:80`.
+- **Workers cannot connect to Redis/Celery**: All worker containers defaulted to
+  `redis://localhost:6379` for the Celery broker and result backend. Fixed by adding
+  explicit `CELERY_BROKER_URL` and `CELERY_RESULT_BACKEND` env vars to all worker services
+  in `docker-compose.prod.yml` and by updating `config.py` to build the URLs dynamically
+  from `REDIS_HOST`/`REDIS_PORT` when not explicitly set.
+- **Kokoro model requests hang**: The `tts.kokoro` queue was not declared in the Celery app
+  configuration (`celery.py`), causing tasks routed to that queue to be silently ignored.
+  Queue is now registered alongside the other model queues.
+- **HuggingFace cache path undefined in secondary workers**: `worker-fish`, `worker-qwen3`,
+  `worker-f5`, `worker-orpheus`, and `worker-dia` were missing `HF_HOME` and `HOME`
+  environment variables, causing inconsistent cache directory behavior. Now explicitly set
+  to `/root/.cache/huggingface` and `/root`.
+
 ## [0.1.0] - 2026-04-12
 
 ### Overview

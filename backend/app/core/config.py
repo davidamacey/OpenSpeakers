@@ -34,8 +34,19 @@ class Settings(BaseSettings):
     REDIS_HOST: str = "localhost"
     REDIS_PORT: int = 6379
     REDIS_PASSWORD: str = ""
-    CELERY_BROKER_URL: str = "redis://localhost:6379/0"
-    CELERY_RESULT_BACKEND: str = "redis://localhost:6379/1"
+    # If explicitly set, use as-is. Otherwise, constructed from REDIS_HOST/PORT below.
+    CELERY_BROKER_URL: str = ""
+    CELERY_RESULT_BACKEND: str = ""
+
+    @model_validator(mode="after")
+    def _build_celery_urls(self) -> Settings:
+        auth = f":{self.REDIS_PASSWORD}@" if self.REDIS_PASSWORD else ""
+        base = f"redis://{auth}{self.REDIS_HOST}:{self.REDIS_PORT}"
+        if not self.CELERY_BROKER_URL:
+            self.CELERY_BROKER_URL = f"{base}/0"
+        if not self.CELERY_RESULT_BACKEND:
+            self.CELERY_RESULT_BACKEND = f"{base}/1"
+        return self
 
     # GPU
     GPU_DEVICE_ID: int = 0

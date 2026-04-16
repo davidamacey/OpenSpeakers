@@ -31,6 +31,7 @@ celery_app.conf.update(
     # Queues
     task_queues=[
         Queue("tts"),
+        Queue("tts.kokoro"),
         Queue("tts.fish-speech"),
         Queue("tts.qwen3"),
         Queue("tts.orpheus"),
