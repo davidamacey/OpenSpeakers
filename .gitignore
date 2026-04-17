@@ -30,6 +30,10 @@ frontend/dist/
 /model_cache/
 /audio_output/
 
+# Local install test directories
+/test-install/
+/openspeakers/
+
 # Database
 *.sqlite
 *.db

@@ -101,7 +101,20 @@ class FishSpeechModel(TTSModelBase):
         self._model_path = settings.FISH_SPEECH_MODEL_PATH
         logger.info("Loading Fish Speech from %s on %s", self._model_path, device)
 
+        # If the configured path is a HuggingFace Hub ID (no local path separator),
+        # resolve it to a local snapshot via huggingface_hub. This handles first-run
+        # downloads automatically.
         checkpoint_path = self._model_path
+        if not Path(checkpoint_path).exists():
+            from huggingface_hub import snapshot_download
+
+            logger.info("Downloading Fish Speech model from HuggingFace Hub: %s", checkpoint_path)
+            checkpoint_path = snapshot_download(
+                repo_id=checkpoint_path,
+                repo_type="model",
+                ignore_patterns=["*.md", "*.txt"],
+            )
+            logger.info("Fish Speech model downloaded to: %s", checkpoint_path)
         decoder_path = str(Path(checkpoint_path) / DECODER_FILENAME)
 
         logger.info("Launching Fish Speech LLM queue...")

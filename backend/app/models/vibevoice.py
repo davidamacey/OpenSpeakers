@@ -41,8 +41,7 @@ BUILTIN_VOICES: dict[str, str] = {
 
 DEFAULT_VOICE = "en-Emma"
 
-# Path to the VibeVoice repo (mounted as a Docker volume)
-VIBEVOICE_VOICES_DIR = Path("/opt/vibevoice/demo/voices/streaming_model")
+VIBEVOICE_VOICES_DIR = Path("/app/demo/voices/streaming_model")
 
 
 class VibeVoiceModel(TTSModelBase):

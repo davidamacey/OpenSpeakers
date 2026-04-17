@@ -289,15 +289,15 @@ BACKEND_PORT="${BACKEND_PORT:-8080}"
 FRONTEND_PORT="${FRONTEND_PORT:-5200}"
 
 print_info "Waiting for backend to become ready..."
-max_wait=60
+max_wait=120
 elapsed=0
 while [[ $elapsed -lt $max_wait ]]; do
-    if curl -fsSL --max-time 3 "http://localhost:${BACKEND_PORT}/api/system/health" &>/dev/null; then
+    if curl -fsSL --max-time 3 "http://localhost:${BACKEND_PORT}/health" &>/dev/null; then
         print_success "Backend is ready"
         break
     fi
-    sleep 3
-    elapsed=$((elapsed + 3))
+    sleep 5
+    elapsed=$((elapsed + 5))
 done
 
 if [[ $elapsed -ge $max_wait ]]; then
