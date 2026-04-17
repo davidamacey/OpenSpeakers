@@ -117,6 +117,8 @@ services:
       - HOME=/home/appuser
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - USER=appuser
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d tts-worker@$$HOSTNAME"]
       interval: 30s
@@ -159,6 +161,8 @@ services:
       - HOME=/home/appuser
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - USER=appuser
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d kokoro-worker@$$HOSTNAME"]
       interval: 30s
@@ -199,6 +203,8 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - HF_HOME=/root/.cache/huggingface
       - HOME=/root
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d fish-worker@$$HOSTNAME"]
       interval: 30s
@@ -238,6 +244,8 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - HF_HOME=/root/.cache/huggingface
       - HOME=/root
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d qwen3-worker@$$HOSTNAME"]
       interval: 30s
@@ -278,6 +286,8 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - HF_HOME=/root/.cache/huggingface
       - HOME=/root
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d f5-worker@$$HOSTNAME"]
       interval: 30s
@@ -318,6 +328,8 @@ services:
       - TORCHINDUCTOR_CACHE_DIR=/tmp/torchinductor_cache
       - HF_HOME=/root/.cache/huggingface
       - HOME=/root
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d orpheus-worker@$$HOSTNAME"]
       interval: 30s
@@ -359,6 +371,8 @@ services:
       - NVIDIA_DRIVER_CAPABILITIES=compute,utility
       - HF_HOME=/root/.cache/huggingface
       - HOME=/root
+      - HF_TOKEN=${HF_TOKEN:-}
+      - HUGGING_FACE_HUB_TOKEN=${HF_TOKEN:-}
     healthcheck:
       test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d dia-worker@$$HOSTNAME"]
       interval: 30s
