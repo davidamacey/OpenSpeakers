@@ -94,9 +94,10 @@ class Qwen3TTSModel(TTSModelBase):
 
         # Resolve local snapshot path — AutoProcessor.from_pretrained makes an API
         # call when given a repo ID under HF_HUB_OFFLINE=1; using the local path bypasses it.
+        # local_files_only=False allows first-run download; subsequent calls use cache.
         model_path = snapshot_download(
             "Qwen/Qwen3-TTS-12Hz-1.7B-CustomVoice",
-            local_files_only=True,
+            local_files_only=False,
         )
         logger.info("Qwen3 TTS model path: %s", model_path)
 
@@ -198,7 +199,7 @@ class Qwen3TTSModel(TTSModelBase):
             logger.info("Loading Qwen3 TTS Base model for voice cloning…")
             from huggingface_hub import snapshot_download as _snap
 
-            base_path = _snap("Qwen/Qwen3-TTS-12Hz-1.7B-Base", local_files_only=True)
+            base_path = _snap("Qwen/Qwen3-TTS-12Hz-1.7B-Base", local_files_only=False)
             self._clone_model = QwenModel.from_pretrained(
                 base_path,
                 device_map=self._device,
