@@ -96,10 +96,15 @@ with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKi
 ### One-Line Install
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/scripts/install.sh | bash
+curl -fsSL https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/setup-openspeakers.sh | bash
 ```
 
-This downloads the compose files, pulls all images from Docker Hub, and starts the app. That's it.
+The setup script handles everything on a fresh machine:
+- ✅ Checks Docker, NVIDIA Container Toolkit, and GPU
+- ✅ **Enables Docker to start on boot** (`systemctl enable docker`)
+- ✅ Downloads compose files and generates `.env` with a secure random secret key
+- ✅ Creates `model_cache` and `audio_output` directories with correct permissions for the container's UID 1000 user
+- ✅ Pulls all images and starts all services
 
 **Requirements:** Docker with Compose v2, NVIDIA GPU, [NVIDIA Container Toolkit](https://docs.nvidia.com/datacenter/cloud-native/container-toolkit/install-guide.html)
 
@@ -108,7 +113,9 @@ Once running:
 - **API:** http://localhost:8080
 - **Docs:** http://localhost:8080/docs
 
-Models download automatically on first use (~1-22 GB each depending on the model).
+Models download automatically on first use (~1–22 GB each depending on the model).
+
+> **Permission errors after install?** Run `./scripts/fix-model-permissions.sh` — it fixes `model_cache` ownership without requiring sudo.
 
 ### Manual Install (from Docker Hub)
 
@@ -118,6 +125,9 @@ curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/dock
 curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/docker-compose.gpu.yml
 curl -fsSLO https://raw.githubusercontent.com/davidamacey/OpenSpeakers/main/.env.example
 cp .env.example .env
+# Fix model cache permissions for the appuser (UID 1000) container user
+mkdir -p model_cache/huggingface model_cache/torch
+docker run --rm -v "$(pwd)/model_cache:/mc" busybox chown -R 1000:1000 /mc
 docker compose -f docker-compose.prod.yml -f docker-compose.gpu.yml up -d
 ```
 

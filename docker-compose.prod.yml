@@ -104,6 +104,10 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -142,6 +146,10 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -178,6 +186,10 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -214,6 +226,10 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -250,6 +266,10 @@ services:
     environment:
       - PYTHONPATH=/app:/opt/cosyvoice:/opt/cosyvoice/third_party/Matcha-TTS
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -286,6 +306,10 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
@@ -321,6 +345,10 @@ services:
       - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
     environment:
       - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=${POSTGRES_DB:-openspeakers}
+      - POSTGRES_USER=${POSTGRES_USER:-openspeakers}
+      - POSTGRES_PASSWORD=${POSTGRES_PASSWORD:-openspeakers}
       - REDIS_HOST=redis
       - CELERY_BROKER_URL=redis://redis:6379/0
       - CELERY_RESULT_BACKEND=redis://redis:6379/1
