@@ -31,8 +31,11 @@ from app.models.base import GenerateRequest, GenerateResult, TTSModelBase
 
 logger = logging.getLogger(__name__)
 
-# Decoder checkpoint filename in the model directory
-DECODER_FILENAME = "codec.pth"
+# Decoder checkpoint filenames to search (fish-speech model naming changed across versions)
+_DECODER_CANDIDATES = [
+    "codec.pth",
+    "firefly-gan-vq-fsq-8x1024-21hz-generator.pth",
+]
 
 
 class FishSpeechModel(TTSModelBase):
@@ -115,7 +118,19 @@ class FishSpeechModel(TTSModelBase):
                 ignore_patterns=["*.md", "*.txt"],
             )
             logger.info("Fish Speech model downloaded to: %s", checkpoint_path)
-        decoder_path = str(Path(checkpoint_path) / DECODER_FILENAME)
+
+        # Find the decoder .pth file — filename changed between model versions
+        decoder_path = None
+        for candidate in _DECODER_CANDIDATES:
+            p = Path(checkpoint_path) / candidate
+            if p.exists():
+                decoder_path = str(p)
+                break
+        if decoder_path is None:
+            raise FileNotFoundError(
+                f"Could not find Fish Speech decoder in {checkpoint_path}. "
+                f"Tried: {_DECODER_CANDIDATES}"
+            )
 
         logger.info("Launching Fish Speech LLM queue...")
         self._llama_queue = launch_thread_safe_queue(
