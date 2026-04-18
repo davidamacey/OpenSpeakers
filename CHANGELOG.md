@@ -5,7 +5,7 @@ All notable changes to OpenSpeakers are documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [0.1.1] - 2026-04-15
+## [0.1.1] - 2026-04-18
 
 ### Fixed
 
@@ -23,6 +23,44 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `worker-f5`, `worker-orpheus`, and `worker-dia` were missing `HF_HOME` and `HOME`
   environment variables, causing inconsistent cache directory behavior. Now explicitly set
   to `/root/.cache/huggingface` and `/root`.
+- **VibeVoice 0.5B crash** (`'NoneType' object is not subscriptable`): Voice .pt files were
+  at `/app/demo/voices/streaming_model/` inside the worker image, but the code looked under
+  `/opt/vibevoice/demo/voices/streaming_model/`. `_resolve_voice()` returned `None` and the
+  model crashed in `process_input_with_cached_prompt`. Fixed the directory constant.
+- **Fish Speech fails on fresh install**: `launch_thread_safe_queue()` was called with a
+  HuggingFace Hub repo ID as if it were a local path — fine when the model was pre-cached,
+  but crashed on first-run installs. Now calls `snapshot_download()` first to materialize
+  the model locally.
+- **Fish Speech decoder size mismatch**: The project shipped `fishaudio/fish-speech-1.5`,
+  but the installed `fish-speech` library (v2.0.0) expects the newer `fishaudio/s2-pro`
+  architecture (different DAC dimensions, different decoder filename). Updated default
+  `FISH_SPEECH_MODEL_PATH` to `fishaudio/s2-pro` and added a candidate-search for the
+  decoder checkpoint filename (`codec.pth` vs. `firefly-gan-vq-fsq-8x1024-21hz-generator.pth`).
+- **Qwen3 TTS blocked on first-run download**: `snapshot_download(..., local_files_only=True)`
+  prevented the model from being fetched on a fresh install with an empty cache. Now uses
+  `local_files_only=False` for both the CustomVoice and Base (cloning) model paths.
+- **Orpheus 3B gated-model 401**: The worker containers did not receive `HF_TOKEN`, so the
+  gated `canopylabs/orpheus-3b-0.1-ft` repo returned 401. All 7 worker services in
+  `docker-compose.prod.yml` now forward `HF_TOKEN` and `HUGGING_FACE_HUB_TOKEN` from `.env`.
+
+### Added
+
+- **Hardened setup script** (`setup-openspeakers.sh`): network reachability check for
+  github.com / hub.docker.com / huggingface.co, 3-retry download loop for every file,
+  `docker compose config` validation before `up`, 120-second backend health poll,
+  `OPENSPEAKERS_UNATTENDED=1` env var for CI / scripted use, `OPENSPEAKERS_BRANCH` override
+  for testing pre-release branches.
+- **`HF_TOKEN` env var** in `.env.example` with documentation pointing to the HuggingFace
+  settings page and the Orpheus model license page.
+- **`scripts/fix-model-permissions.sh`**: standalone helper that chowns `model_cache/` to
+  UID 1000 (the container user) using Docker or sudo.
+
+### Changed
+
+- `/test-install/` and `/openspeakers/` added to `.gitignore` so ad-hoc install-test
+  directories never get committed.
+- Default `FISH_SPEECH_MODEL_PATH` in both `config.py` and `.env.example` is now
+  `fishaudio/s2-pro` (was `fishaudio/fish-speech-1.5`).
 
 ## [0.1.0] - 2026-04-12
 
