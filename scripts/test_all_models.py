@@ -12,12 +12,25 @@ Usage:
 from __future__ import annotations
 
 import json
+import mimetypes
+import os
+import shutil
+import subprocess
 import sys
+import tempfile
 import time
 import urllib.error
 import urllib.request
+import uuid
 from argparse import ArgumentParser
 from dataclasses import dataclass, field
+from pathlib import Path
+
+# Pin all GPU work to slot 0 (RTX A6000). Every cloning model is expected to
+# run on this device; the user's GPU 1 is reserved for OpenTranscribe and
+# slot 2 is reserved for vLLM. Setdefault means callers can still override
+# explicitly via the environment.
+os.environ.setdefault("CUDA_VISIBLE_DEVICES", "0")
 
 # ── Configuration ───────────────────────────────────────────────────────────
 
@@ -323,6 +336,344 @@ def print_summary(results: list[TestResult]) -> None:
                 print(f"    Note:   {note}")
 
 
+# ── Cloning round-trip mode ─────────────────────────────────────────────────
+#
+# `--cloning` exercises every cloning-capable model end-to-end:
+#   1) Generate one Kokoro reference clip with a known transcript.
+#   2) Upload it as a VoiceProfile under each cloning model with the known
+#      transcript pre-filled (so we don't depend on faster-whisper).
+#   3) Submit a TTS job using that profile, poll to completion, fetch audio.
+#   4) Compute speaker similarity between the Kokoro reference and the
+#      cloned output via `scripts/eval_speaker_similarity.py` (or the
+#      in-process module if importable).
+#   5) PASS iff similarity >= CLONING_SIMILARITY_THRESHOLD.
+
+CLONING_REFERENCE_PATH = Path("/tmp/openspeakers_ref.wav")
+CLONING_REFERENCE_TEXT = (
+    "The quick brown fox jumps over the lazy dog. "
+    "This is a test of the voice cloning system."
+)
+CLONING_GEN_TEXT = "Hello, this is a quick test of cloning."
+CLONING_SIMILARITY_THRESHOLD = 0.4
+
+# Cloning-capable target models. Kokoro is the *source* for the reference
+# clip, not a clone target. Orpheus and Parler do not support cloning.
+CLONING_MODELS: list[str] = [
+    "fish-speech-s2",
+    "vibevoice-1.5b",
+    "qwen3-tts",
+    "f5-tts",
+    "chatterbox",
+    "cosyvoice-2",
+    "dia-1b",
+]
+
+# Some cloning models need their text in a special format (Dia uses [S1]/[S2]).
+CLONING_TEXT_OVERRIDE: dict[str, str] = {
+    "dia-1b": "[S1] Hello, this is a quick test of cloning.",
+}
+
+
+@dataclass
+class CloningResult:
+    model_id: str
+    status: str = "not_tested"  # pass, fail, skipped
+    similarity: float | None = None
+    duration_seconds: float = 0.0
+    error_message: str = ""
+    voice_id: str | None = None
+
+
+def api_post_multipart(path: str, *, data: dict, files: dict) -> dict:
+    """POST a multipart/form-data request via the stdlib (no requests dependency).
+
+    ``files`` is ``{name: (filename, bytes, content_type)}`` mirroring requests.
+    """
+    boundary = f"----openspeakers{uuid.uuid4().hex}"
+    body_parts: list[bytes] = []
+    for k, v in data.items():
+        body_parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{k}"\r\n\r\n'
+                f"{v}\r\n"
+            ).encode()
+        )
+    for field_name, (filename, content, ctype) in files.items():
+        body_parts.append(
+            (
+                f"--{boundary}\r\n"
+                f'Content-Disposition: form-data; name="{field_name}"; '
+                f'filename="{filename}"\r\n'
+                f"Content-Type: {ctype}\r\n\r\n"
+            ).encode()
+        )
+        body_parts.append(content)
+        body_parts.append(b"\r\n")
+    body_parts.append(f"--{boundary}--\r\n".encode())
+    body = b"".join(body_parts)
+
+    url = f"{BASE_URL}{path}"
+    req = urllib.request.Request(
+        url, data=body, method="POST",
+        headers={"Content-Type": f"multipart/form-data; boundary={boundary}"},
+    )
+    with urllib.request.urlopen(req, timeout=60) as resp:
+        return json.loads(resp.read().decode())
+
+
+def api_delete(path: str) -> int:
+    url = f"{BASE_URL}{path}"
+    req = urllib.request.Request(url, method="DELETE")
+    try:
+        with urllib.request.urlopen(req, timeout=30) as resp:
+            return resp.status
+    except urllib.error.HTTPError as e:
+        return e.code
+
+
+def download_audio(job_id: str, dest: Path) -> None:
+    """Stream the generated audio to ``dest``."""
+    url = f"{BASE_URL}/tts/jobs/{job_id}/audio"
+    req = urllib.request.Request(url, method="GET")
+    with urllib.request.urlopen(req, timeout=60) as resp, dest.open("wb") as fh:
+        shutil.copyfileobj(resp, fh)
+
+
+def submit_clone_job(model_id: str, voice_id: str) -> str:
+    """Submit a TTS job using a voice profile, return the job_id."""
+    text = CLONING_TEXT_OVERRIDE.get(model_id, CLONING_GEN_TEXT)
+    payload = {
+        "model_id": model_id,
+        "text": text,
+        "language": "en",
+        "voice_profile_id": voice_id,
+    }
+    return api_post("/tts/generate", payload)["job_id"]
+
+
+def generate_kokoro_reference(timeout: int) -> Path:
+    """Use Kokoro to synthesize the known reference text, save WAV to disk."""
+    print(f"\n  Generating Kokoro reference clip → {CLONING_REFERENCE_PATH}")
+    payload = {
+        "model_id": "kokoro",
+        "text": CLONING_REFERENCE_TEXT,
+        "language": "en",
+    }
+    job_id = api_post("/tts/generate", payload)["job_id"]
+    job = poll_job(job_id, timeout)
+    if job.get("status") != "complete":
+        raise RuntimeError(
+            f"Kokoro reference generation failed: status={job.get('status')} "
+            f"err={job.get('error_message')}"
+        )
+    download_audio(job_id, CLONING_REFERENCE_PATH)
+    size = CLONING_REFERENCE_PATH.stat().st_size
+    print(f"  Reference WAV written: {size} bytes")
+    return CLONING_REFERENCE_PATH
+
+
+def upload_reference_as_voice(model_id: str, ref_path: Path, name: str) -> str:
+    """POST /api/voices with the reference WAV + the known transcript.
+
+    Pre-filling ``reference_text`` skips the ASR worker, which we can't
+    assume is running.
+    """
+    ctype = mimetypes.guess_type(str(ref_path))[0] or "audio/wav"
+    with ref_path.open("rb") as fh:
+        content = fh.read()
+    body = api_post_multipart(
+        "/voices",
+        data={
+            "name": name,
+            "model_id": model_id,
+            "reference_text": CLONING_REFERENCE_TEXT,
+        },
+        files={"reference_audio": (ref_path.name, content, ctype)},
+    )
+    return body["id"]
+
+
+def compute_similarity(ref: Path, gen: Path) -> float:
+    """Compute speaker similarity. Prefer the in-process module; fall back
+    to ``scripts/eval_speaker_similarity.py`` so this works whether we're
+    running on the host or inside a container."""
+    try:
+        from app.eval.similarity import reference_similarity  # type: ignore
+
+        return float(reference_similarity(str(ref), str(gen)))
+    except ImportError:
+        pass
+
+    script = Path(__file__).parent / "eval_speaker_similarity.py"
+    proc = subprocess.run(
+        [sys.executable, str(script), str(ref), str(gen)],
+        capture_output=True,
+        text=True,
+    )
+    if proc.returncode != 0:
+        raise RuntimeError(
+            f"eval_speaker_similarity.py failed: {proc.stderr.strip() or proc.stdout!r}"
+        )
+    return float(proc.stdout.strip().splitlines()[-1])
+
+
+def run_cloning_test(
+    model_id: str, ref_path: Path, timeout: int, keep: bool
+) -> CloningResult:
+    result = CloningResult(model_id=model_id)
+    print(f"\n{'='*60}")
+    print(f"Cloning test: {model_id}")
+    print(f"{'='*60}")
+
+    # 1) Upload the Kokoro reference as a voice profile under this model.
+    try:
+        voice_id = upload_reference_as_voice(
+            model_id, ref_path, name=f"clonetest-{model_id}-{uuid.uuid4().hex[:8]}"
+        )
+        result.voice_id = voice_id
+        print(f"  Voice profile created: {voice_id}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if hasattr(e, "read") else ""
+        result.status = "fail"
+        result.error_message = f"voice upload HTTP {e.code}: {body}"
+        print(f"  [FAIL] {result.error_message}")
+        return result
+    except Exception as e:
+        result.status = "fail"
+        result.error_message = f"voice upload error: {e}"
+        print(f"  [FAIL] {result.error_message}")
+        return result
+
+    # Brief pause so clone_voice has a moment to populate extra_info — most
+    # models rely on it. Not strictly required; the worker will block on
+    # the lock anyway.
+    time.sleep(2)
+
+    # 2) Submit a generation job using the cloned voice.
+    try:
+        job_id = submit_clone_job(model_id, voice_id)
+        print(f"  Cloning job submitted: {job_id}")
+    except urllib.error.HTTPError as e:
+        body = e.read().decode() if hasattr(e, "read") else ""
+        result.status = "fail"
+        result.error_message = f"job submit HTTP {e.code}: {body}"
+        print(f"  [FAIL] {result.error_message}")
+        if not keep:
+            api_delete(f"/voices/{voice_id}")
+        return result
+
+    job = poll_job(job_id, timeout)
+    status = job.get("status")
+    if status != "complete":
+        result.status = "fail"
+        result.error_message = (
+            f"job ended in {status}: {job.get('error_message') or '(no msg)'}"
+        )
+        print(f"  [FAIL] {result.error_message}")
+        if not keep:
+            api_delete(f"/voices/{voice_id}")
+        return result
+    result.duration_seconds = float(job.get("duration_seconds") or 0.0)
+
+    # 3) Download the audio and score it against the reference.
+    with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+        gen_path = Path(tf.name)
+    try:
+        download_audio(job_id, gen_path)
+        print(f"  Generated audio: {gen_path} ({gen_path.stat().st_size} bytes)")
+
+        try:
+            score = compute_similarity(ref_path, gen_path)
+        except Exception as e:
+            result.status = "fail"
+            result.error_message = f"similarity scoring failed: {e}"
+            print(f"  [FAIL] {result.error_message}")
+            return result
+
+        result.similarity = score
+        if score >= CLONING_SIMILARITY_THRESHOLD:
+            result.status = "pass"
+            print(f"  [PASS] similarity={score:.3f} (>= {CLONING_SIMILARITY_THRESHOLD})")
+        else:
+            result.status = "fail"
+            result.error_message = (
+                f"similarity {score:.3f} below threshold "
+                f"{CLONING_SIMILARITY_THRESHOLD}"
+            )
+            print(f"  [FAIL] {result.error_message}")
+    finally:
+        gen_path.unlink(missing_ok=True)
+        if not keep and result.voice_id:
+            api_delete(f"/voices/{result.voice_id}")
+
+    return result
+
+
+def print_cloning_summary(results: list[CloningResult]) -> None:
+    print(f"\n\n{'#'*70}")
+    print("#  CLONING SUMMARY")
+    print(f"{'#'*70}\n")
+    print(f"{'Model':<20} {'Duration':<12} {'Similarity':<12} {'Result':<8}")
+    print(f"{'-'*20} {'-'*12} {'-'*12} {'-'*8}")
+    for r in results:
+        sim_str = f"{r.similarity:.3f}" if r.similarity is not None else "-"
+        dur = f"{r.duration_seconds:.1f}s" if r.duration_seconds else "-"
+        verdict = "PASS" if r.status == "pass" else "FAIL"
+        print(f"{r.model_id:<20} {dur:<12} {sim_str:<12} {verdict:<8}")
+        if r.status != "pass" and r.error_message:
+            print(f"    -> {r.error_message}")
+    passed = sum(1 for r in results if r.status == "pass")
+    total = len(results)
+    print(f"\n{passed}/{total} cloning models passed "
+          f"(threshold: similarity >= {CLONING_SIMILARITY_THRESHOLD}).")
+
+
+def run_cloning_suite(args) -> int:
+    """Drive the cloning round-trip for every cloning-capable model.
+
+    Returns process exit code (0 = all pass, 1 = any fail).
+    """
+    print("OpenSpeakers Cloning Round-Trip Suite")
+    print(f"{'='*40}")
+    print(f"API Base: {BASE_URL}")
+    print(f"CUDA_VISIBLE_DEVICES={os.environ.get('CUDA_VISIBLE_DEVICES', '?')}")
+    print(f"Reference text: {CLONING_REFERENCE_TEXT!r}")
+    print(f"Generation text: {CLONING_GEN_TEXT!r}")
+    print(f"Threshold: similarity >= {CLONING_SIMILARITY_THRESHOLD}")
+
+    # Determine target list (allow filtering via --models / --skip).
+    targets = list(CLONING_MODELS)
+    if args.models:
+        wanted = set(args.models.split(","))
+        targets = [m for m in targets if m in wanted]
+    if args.skip:
+        skip = set(args.skip.split(","))
+        targets = [m for m in targets if m not in skip]
+    if not targets:
+        print("No cloning models selected after filtering.")
+        return 0
+    print(f"Cloning targets: {targets}")
+
+    # Generate the Kokoro reference once.
+    try:
+        ref_path = generate_kokoro_reference(args.timeout)
+    except Exception as e:
+        print(f"FATAL: cannot generate Kokoro reference clip: {e}")
+        return 1
+
+    results: list[CloningResult] = []
+    for i, model_id in enumerate(targets, 1):
+        print(f"\n[{i}/{len(targets)}] ", end="")
+        results.append(run_cloning_test(model_id, ref_path, args.timeout, args.keep))
+        if i < len(targets):
+            print("\n  Waiting 5s before next model...")
+            time.sleep(5)
+
+    print_cloning_summary(results)
+    return 0 if all(r.status == "pass" for r in results) else 1
+
+
 def main() -> None:
     parser = ArgumentParser(description="Test all OpenSpeakers TTS models")
     parser.add_argument("--models", type=str, default="",
@@ -331,7 +682,16 @@ def main() -> None:
                         help=f"Timeout per model in seconds (default: {DEFAULT_TIMEOUT})")
     parser.add_argument("--skip", type=str, default="",
                         help="Comma-separated list of model IDs to skip")
+    parser.add_argument("--cloning", action="store_true",
+                        help="Run cloning round-trip tests across all cloning-capable models "
+                             "with speaker-similarity assertions (>= "
+                             f"{CLONING_SIMILARITY_THRESHOLD}).")
+    parser.add_argument("--keep", action="store_true",
+                        help="In --cloning mode, skip cleanup of generated voice profiles.")
     args = parser.parse_args()
+
+    if args.cloning:
+        sys.exit(run_cloning_suite(args))
 
     print(f"OpenSpeakers TTS Model Test Suite")
     print(f"{'='*40}")
