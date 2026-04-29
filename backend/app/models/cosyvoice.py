@@ -10,7 +10,7 @@ import io
 import logging
 from pathlib import Path
 
-from app.models._ref_audio import prepare_reference
+from app.models._ref_audio import prepare_reference_to_file
 from app.models.base import GenerateRequest, GenerateResult, TTSModelBase
 
 logger = logging.getLogger(__name__)
@@ -115,10 +115,12 @@ class CosyVoice2Model(TTSModelBase):
         ref_text = (request.extra.get("ref_text") or "").strip()
         instruct_text = request.extra.get("instruct", "")
 
-        # Pre-clean prompt to mono / 16 kHz / ≤30s for the prompt encoder; the
-        # model still emits at its native output rate (24 kHz for CosyVoice 2.0).
-        audio_arr, _ = prepare_reference(ref_audio, 16000, max_seconds=30)
-        prompt_speech_16k = torch.from_numpy(audio_arr).unsqueeze(0)
+        # Pre-clean prompt and write a cleaned WAV to disk. CosyVoice's frontend
+        # internally calls load_wav(path, 24000) inside _extract_speech_feat, so
+        # the prompt MUST be a path-like, not a tensor (passing a tensor here
+        # produces "Invalid file: tensor(...)"). The 16 kHz target is for our
+        # cleaning pass; CosyVoice resamples to 24 kHz internally.
+        prompt_wav_path = str(prepare_reference_to_file(ref_audio, 16000, max_seconds=30))
 
         all_audio = []
 
@@ -126,7 +128,7 @@ class CosyVoice2Model(TTSModelBase):
             # Voice-design mode: shape voice with a natural-language instruction.
             # The instruct path always takes the cleaned prompt directly.
             for chunk in self._model.inference_instruct2(
-                request.text, instruct_text, prompt_speech_16k, stream=False
+                request.text, instruct_text, prompt_wav_path, stream=False
             ):
                 all_audio.append(chunk["tts_speech"])
         elif ref_text:
@@ -135,7 +137,7 @@ class CosyVoice2Model(TTSModelBase):
             for chunk in self._model.inference_zero_shot(
                 request.text,
                 prompt_text=ref_text,
-                prompt_wav=prompt_speech_16k,
+                prompt_wav=prompt_wav_path,
                 stream=False,
             ):
                 all_audio.append(chunk["tts_speech"])
@@ -151,7 +153,7 @@ class CosyVoice2Model(TTSModelBase):
                 try:
                     self._model.add_zero_shot_spk(
                         prompt_text="",
-                        prompt_wav=prompt_speech_16k,
+                        prompt_wav=prompt_wav_path,
                         zero_shot_spk_id=spk_id,
                     )
                     self._zero_shot_spk_cache[spk_id] = True
@@ -178,7 +180,7 @@ class CosyVoice2Model(TTSModelBase):
                 for chunk in self._model.inference_zero_shot(
                     request.text,
                     prompt_text="",
-                    prompt_wav=prompt_speech_16k,
+                    prompt_wav=prompt_wav_path,
                     stream=False,
                 ):
                     all_audio.append(chunk["tts_speech"])
