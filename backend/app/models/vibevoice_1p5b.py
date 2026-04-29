@@ -208,21 +208,29 @@ class VibeVoice1p5BModel(TTSModelBase):
         }
 
     def _load_voice_samples(self, voice_id: str | None) -> list | None:
-        """Load reference audio as voice_samples list for the processor."""
+        """Load reference audio as voice_samples list for the processor.
+
+        Uses the shared ``prepare_reference`` helper which handles mono conversion,
+        resample to 24 kHz, silence trim, loudness normalization, and a 30 s clip.
+        Loudness normalization is the biggest win here — VibeVoice's voice
+        tokenizer is sensitive to RMS.
+        """
         if voice_id is None:
             return None
 
-        import torchaudio
+        from app.models._ref_audio import prepare_reference
 
         ref_path = Path(voice_id)
         if not ref_path.exists():
             logger.warning("Voice reference %r not found, using default voice", voice_id)
             return None
 
-        waveform, sr = torchaudio.load(str(ref_path))
-        if sr != self.SAMPLE_RATE:
-            waveform = torchaudio.functional.resample(waveform, sr, self.SAMPLE_RATE)
-        if waveform.shape[0] > 1:
-            waveform = waveform.mean(0, keepdim=True)
-
-        return [waveform.squeeze(0).numpy()]
+        # Lets ReferenceAudioError propagate (e.g. clip < 3 s after trim) so the
+        # user gets a clear error instead of a cryptic shape error downstream.
+        arr, _sr = prepare_reference(
+            ref_path,
+            self.SAMPLE_RATE,
+            max_seconds=30,
+            min_seconds=3.0,
+        )
+        return [arr]

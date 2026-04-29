@@ -36,6 +36,7 @@ class DiaTTSModel(TTSModelBase):
     help_text = (
         "Multi-speaker dialogue with [S1]/[S2] tags. Supports nonverbal sounds: "
         "(laughs), (sighs), (coughs), (clears throat), (whispers). "
+        "Voice cloning requires a transcript of the reference audio. "
         "Slow generation (~30s). English only. ~10 GB VRAM."
     )
 
@@ -65,25 +66,101 @@ class DiaTTSModel(TTSModelBase):
         if not self._loaded or self._model is None:
             raise RuntimeError("Dia 1.6B is not loaded")
 
+        from pathlib import Path
+
         import numpy as np
 
-        # Dia expects text in [S1] / [S2] format for dialogue
-        # If text doesn't have speaker tags, wrap it as single speaker
-        text = request.text
-        if not text.strip().startswith("[S"):
-            text = f"[S1] {text}"
+        from app.models._ref_audio import prepare_reference, prepare_reference_to_file
 
-        use_torch_compile = request.extra.get("use_torch_compile", False)
-        audio = self._model.generate(
-            text,
-            use_torch_compile=use_torch_compile,
-            verbose=False,
-        )
+        # Cloning is requested when voice_id is a path to an existing audio file.
+        voice_id = request.voice_id
+        is_cloning = bool(voice_id and Path(voice_id).exists())
+
+        # Sampler params (apply to both cloning and non-cloning paths).
+        cfg_scale = float(request.extra.get("cfg_scale", 4.0))
+        temperature = float(request.extra.get("temperature", 1.8))
+        top_p = float(request.extra.get("top_p", 0.90))
+        cfg_filter_top_k = int(request.extra.get("cfg_filter_top_k", 50))
+        use_torch_compile = bool(request.extra.get("use_torch_compile", False))
+
+        if is_cloning:
+            ref_text = (request.extra.get("ref_text") or "").strip()
+            if not ref_text:
+                raise RuntimeError(
+                    "Dia voice cloning requires a transcript of the reference audio. "
+                    "Edit the voice profile and add 'reference_text'."
+                )
+
+            # Clean the reference clip and grab its actual duration so we can
+            # head-trim the re-synth from the model's output later.
+            cleaned_path = prepare_reference_to_file(voice_id, SAMPLE_RATE, max_seconds=10)
+            cleaned_arr, cleaned_sr = prepare_reference(voice_id, SAMPLE_RATE, max_seconds=10)
+            ref_duration_s = len(cleaned_arr) / cleaned_sr
+
+            # Per upstream example/voice_clone.py: prepend the transcript of the
+            # reference audio (with speaker tag) before the new text, and pass
+            # the reference WAV via audio_prompt=.
+            prefix = ref_text if ref_text.startswith("[S") else f"[S1] {ref_text}"
+            gen_text = (
+                request.text if request.text.strip().startswith("[S") else f"[S1] {request.text}"
+            )
+            full_text = prefix + " " + gen_text
+
+            audio = self._model.generate(
+                full_text,
+                audio_prompt=str(cleaned_path),
+                use_torch_compile=use_torch_compile,
+                verbose=False,
+                cfg_scale=cfg_scale,
+                temperature=temperature,
+                top_p=top_p,
+                cfg_filter_top_k=cfg_filter_top_k,
+            )
+        else:
+            ref_duration_s = 0.0
+            text = request.text
+            if not text.strip().startswith("[S"):
+                text = f"[S1] {text}"
+
+            audio = self._model.generate(
+                text,
+                use_torch_compile=use_torch_compile,
+                verbose=False,
+                cfg_scale=cfg_scale,
+                temperature=temperature,
+                top_p=top_p,
+                cfg_filter_top_k=cfg_filter_top_k,
+            )
 
         if hasattr(audio, "numpy"):
             audio = audio.numpy()
 
         sr = SAMPLE_RATE
+
+        # Head-trim the reference re-synth from the output for cloning requests.
+        # Dia regenerates audio for the prepended reference transcript along with
+        # the new text; we drop that portion plus a 100 ms safety margin and apply
+        # a 50 ms cosine fade-in on the cut to avoid a click.
+        if is_cloning and ref_duration_s > 0:
+            # Work in float for the fade math; we'll quantize to int16 below.
+            audio_f = np.asarray(audio, dtype=np.float32)
+            trim_samples = int((ref_duration_s + 0.1) * sr)
+            if trim_samples < len(audio_f) - int(0.5 * sr):
+                fade_n = int(0.05 * sr)
+                audio_f = audio_f[trim_samples:]
+                if len(audio_f) > fade_n:
+                    fade_in = 0.5 * (1 - np.cos(np.linspace(0, np.pi, fade_n))).astype(np.float32)
+                    audio_f[:fade_n] = audio_f[:fade_n] * fade_in
+                audio = audio_f
+            else:
+                logger.warning(
+                    "Dia output (%.2fs) shorter than reference (%.2fs) — returning full "
+                    "output without head-trim.",
+                    len(audio_f) / sr,
+                    ref_duration_s,
+                )
+                audio = audio_f
+
         if audio.dtype != np.int16:
             audio = (audio * 32767).astype(np.int16)
 
