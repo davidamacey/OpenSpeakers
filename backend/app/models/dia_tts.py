@@ -45,7 +45,47 @@ class DiaTTSModel(TTSModelBase):
 
     def load(self, device: str = "cuda") -> None:
         logger.info("Loading Dia 1.6B on %s", device)
+        # Dia's ``load_audio`` calls ``torchaudio.load(path)`` which on
+        # torchaudio 2.10 routes through TorchCodec; the worker image doesn't
+        # bundle TorchCodec so the call raises ImportError and kills every
+        # voice-clone job. Monkey-patch the method to use soundfile directly.
+        import io as _io
+        from pathlib import Path as _Path
+
+        import soundfile as _sf
+        import torch as _torch
         from dia.model import Dia
+
+        def _load_audio_patched(self_dia, audio_path):
+            """soundfile-based replacement for Dia.load_audio.
+
+            Mirrors the upstream method exactly except it reads with soundfile
+            instead of ``torchaudio.load`` (which routes to TorchCodec on
+            torchaudio 2.10+). Returns DAC codebook indices via ``self._encode``,
+            shape (T, C).
+            """
+            if self_dia.dac_model is None:
+                raise RuntimeError(
+                    "DAC model is required for loading audio prompts but was not loaded."
+                )
+            target_sr = 44100  # Dia's DEFAULT_SAMPLE_RATE
+            if isinstance(audio_path, (bytes, bytearray)):
+                src = _io.BytesIO(audio_path)
+            elif isinstance(audio_path, str) and not _Path(audio_path).exists():
+                src = _io.BytesIO(audio_path.encode("latin1"))
+            else:
+                src = audio_path
+            wav, sr = _sf.read(src, dtype="float32", always_2d=True)
+            audio = _torch.from_numpy(wav.T)  # (channels, samples)
+            if sr != target_sr:
+                import torchaudio.functional as _F  # noqa: N812
+
+                audio = _F.resample(audio, sr, target_sr)
+            if audio.shape[0] > 1:
+                audio = audio.mean(dim=0, keepdim=True)
+            return self_dia._encode(audio.to(self_dia.device))
+
+        Dia.load_audio = _load_audio_patched
 
         self._model = Dia.from_pretrained("nari-labs/Dia-1.6B-0626", compute_dtype="float16")
         self._loaded = True
