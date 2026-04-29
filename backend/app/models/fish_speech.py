@@ -76,15 +76,20 @@ class FishSpeechModel(TTSModelBase):
         #   import torchaudio.io._load_audio_fileobj
         # which makes 'torchaudio' a local variable for the entire function, causing
         # an UnboundLocalError on the earlier `torchaudio.list_audio_backends()` call.
+        #
+        # IMPORTANT: do NOT assign to ``self_ref.encode_reference`` or
+        # ``self_ref.decoder_model`` here. Those names are *type annotations* in
+        # upstream's __init__ (no runtime assignment) — the actual values come
+        # from ``VQManager`` (method) and from the engine's __init__ (attribute).
+        # Setting them to ``None`` shadows the real method/attribute on the
+        # instance and produces ``TypeError: 'NoneType' object is not callable``
+        # the moment a reference clip is encoded — which silently broke voice
+        # cloning for every job that supplied a reference.
         from fish_speech.inference_engine import reference_loader as _ref_loader
-
-        _orig_init = _ref_loader.ReferenceLoader.__init__
 
         def _patched_init(self_ref):
             self_ref.ref_by_id = {}
             self_ref.ref_by_hash = {}
-            self_ref.decoder_model = None
-            self_ref.encode_reference = None
             # Determine backend safely using module-level torchaudio
             _ta = torchaudio
             if hasattr(_ta, "list_audio_backends"):
@@ -97,6 +102,37 @@ class FishSpeechModel(TTSModelBase):
                 self_ref.backend = "soundfile"
 
         _ref_loader.ReferenceLoader.__init__ = _patched_init
+
+        # Replace ReferenceLoader.load_audio: upstream calls
+        # ``torchaudio.load(path, backend=self.backend)`` which on torchaudio
+        # 2.10 routes through the new TorchCodec dispatcher. TorchCodec isn't
+        # installed in this image and the call raises ImportError, killing
+        # voice-clone jobs at the prompt-encoding step. soundfile + manual
+        # resampling reproduces the exact behaviour without that dependency.
+        import io as _io
+
+        import soundfile as _sf
+
+        def _patched_load_audio(self_ref, reference_audio, sr):  # noqa: ARG001
+            if isinstance(reference_audio, (bytes, bytearray)):
+                src = _io.BytesIO(reference_audio)
+            elif isinstance(reference_audio, str) and (
+                len(reference_audio) > 255 or not Path(reference_audio).exists()
+            ):
+                src = _io.BytesIO(reference_audio.encode("latin1"))
+            else:
+                src = reference_audio
+            wav, original_sr = _sf.read(src, dtype="float32", always_2d=True)
+            # (samples, channels) -> mono (channels-first like torchaudio.load)
+            audio = wav.mean(axis=1).astype(np.float32)
+            if original_sr != sr:
+                import torchaudio.functional as _F  # noqa: N812
+
+                tensor = torch.from_numpy(audio).unsqueeze(0)
+                audio = _F.resample(tensor, original_sr, sr).squeeze(0).numpy()
+            return audio
+
+        _ref_loader.ReferenceLoader.load_audio = _patched_load_audio
 
         from fish_speech.inference_engine import TTSInferenceEngine
         from fish_speech.models.dac.inference import load_model as load_decoder_model
