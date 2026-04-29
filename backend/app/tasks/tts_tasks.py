@@ -137,7 +137,19 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         if job.voice_profile_id:
             profile = db.query(VoiceProfile).filter(VoiceProfile.id == job.voice_profile_id).first()
             if profile:
-                voice_id = profile.embedding_path or profile.reference_audio_path
+                # ``embedding_path`` is overloaded: clone-capable models that
+                # actually need a learned embedding (Chatterbox .pt, Dia .pt)
+                # store the artefact there, but the eval pipeline *also* caches
+                # its ECAPA reference embedding to ``{id}.npy`` and writes the
+                # path back to the same column. A ``.npy`` is NOT a voice-clone
+                # asset for any TTS model — passing it as ``voice_id`` makes
+                # zero-shot models (Fish, F5, CosyVoice, VibeVoice) try to
+                # decode it as audio and fail. Fall back to the raw reference
+                # audio in that case.
+                voice_artifact = profile.embedding_path or ""
+                if voice_artifact.endswith(".npy"):
+                    voice_artifact = ""
+                voice_id = voice_artifact or profile.reference_audio_path
 
         params = job.parameters or {}
         extra = dict(params.get("extra") or {})
