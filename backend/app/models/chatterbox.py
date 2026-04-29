@@ -64,15 +64,17 @@ class ChatterboxModel(TTSModelBase):
         from app.models._ref_audio import ReferenceAudioError, prepare_reference_to_file
 
         # Pre-clean the reference clip (mono, 24 kHz, silence-trimmed, RMS-normalized,
-        # length-clipped to 15 s). Chatterbox internally resamples to 16 kHz, so 24 kHz
-        # is a safe upper bound. Falls back to the model's default voice on any error.
+        # length-clipped to 30 s). Upstream README uses a "10s ref clip" example but
+        # the model accepts longer references; 30 s gives the speaker encoder more
+        # material. Chatterbox internally resamples to 16 kHz, so 24 kHz is a safe
+        # upper bound. Falls back to the model's default voice on any error.
         cleaned_path: Path | None = None
         if request.voice_id and Path(request.voice_id).exists():
             try:
                 cleaned_path = prepare_reference_to_file(
                     request.voice_id,
                     24000,
-                    max_seconds=15,
+                    max_seconds=30,
                 )
             except ReferenceAudioError as exc:
                 logger.warning(

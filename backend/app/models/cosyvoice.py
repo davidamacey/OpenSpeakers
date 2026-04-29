@@ -123,6 +123,8 @@ class CosyVoice2Model(TTSModelBase):
         # bug) silently band-limited the prompt to 8 kHz before the speech-feat
         # extractor up-sampled it back to 24 kHz, destroying timbre. ECAPA
         # cosine vs human ref jumped from 0.04 → 0.70 by raising this to 24 kHz.
+        # max_seconds=30: CosyVoice2 zero-shot inference accepts long prompts;
+        # upstream examples pass clips up to ~30 s without truncation.
         prompt_wav_path = str(prepare_reference_to_file(ref_audio, 24000, max_seconds=30))
 
         all_audio = []

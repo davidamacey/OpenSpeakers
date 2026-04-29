@@ -63,6 +63,27 @@
     !!selectedModel && !!voiceName.trim() && !!referenceFile && !uploading
   );
 
+  // Per-model recommended reference-clip length, surfaced as a hint next to
+  // the uploader once the user picks a model. Defaults are tuned to each
+  // upstream model's recommended/accepted range (see backend model wrappers).
+  let recommendedLength = $derived.by(() => {
+    switch (selectedModel) {
+      case 'f5-tts':
+        return 'Recommended: 5–12 s of clean audio';
+      case 'dia-1b':
+        return 'Recommended: 5–10 s of clean audio';
+      case 'vibevoice-1.5b':
+        return 'Recommended: 15–60 s of clean audio (longer captures more prosody)';
+      case 'fish-speech-s2':
+      case 'cosyvoice-2':
+      case 'qwen3-tts':
+      case 'chatterbox':
+        return 'Recommended: 15–30 s of clean audio';
+      default:
+        return '';
+    }
+  });
+
   let fileInfo = $derived.by(() => {
     if (!referenceFile) return null;
     const sizeMB = (referenceFile.size / (1024 * 1024)).toFixed(2);
@@ -396,8 +417,19 @@
         Currently supported: <strong>Fish Audio S2-Pro</strong>, <strong>VibeVoice 1.5B</strong>,
         <strong>Qwen3 TTS</strong>, <strong>F5-TTS</strong>, <strong>Chatterbox</strong>,
         <strong>CosyVoice 2.0</strong>, and <strong>Dia 1.6B</strong>.
-        Upload <strong>5-30 seconds</strong> of clean speech for best results. Avoid background noise or music.
       </p>
+      <ul class="mt-2 space-y-1 list-disc list-inside text-sky-700 dark:text-sky-400/80">
+        <li>
+          Use <strong>15&ndash;30 seconds</strong> of clean audio for best results
+          (10&ndash;30 s for most models; F5-TTS uses up to 12 s, Dia uses 5&ndash;10 s).
+        </li>
+        <li>
+          Speak naturally with <strong>emotional variety</strong> &mdash; different intonations,
+          pacing, and inflection give the model more material to learn from.
+        </li>
+        <li>One speaker only. No background music or ambient noise.</li>
+        <li>Avoid heavily processed audio (auto-tune, EQ, reverb).</li>
+      </ul>
     </div>
   </div>
 
@@ -434,8 +466,11 @@
       <!-- svelte-ignore a11y_label_has_associated_control -->
       <label class="label">
         Reference audio
-        <span class="label-hint">(WAV / MP3 / FLAC / M4A / OGG, 5-30 sec recommended)</span>
+        <span class="label-hint">(WAV / MP3 / FLAC / M4A / OGG)</span>
       </label>
+      {#if recommendedLength}
+        <p class="text-xs text-gray-500 dark:text-gray-400 mb-2">{recommendedLength}</p>
+      {/if}
       <div
         class="border-2 border-dashed rounded-xl p-8 text-center cursor-pointer transition-all duration-200"
         class:border-primary-400={isDragging}

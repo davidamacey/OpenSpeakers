@@ -210,9 +210,10 @@ class Qwen3TTSModel(TTSModelBase):
 
         ref_text = (request.extra.get("ref_text") or "").strip()
 
-        # Pre-clean the reference (mono, 24 kHz, ≤15s — Qwen3 TTS advertises a
-        # "3-second rapid clone" sweet spot). Upstream accepts a (numpy, sr) tuple.
-        audio_arr, ref_sr = prepare_reference(request.voice_id, 24000, max_seconds=15)
+        # Pre-clean the reference (mono, 24 kHz, ≤30s). Upstream README advertises
+        # a "3-second rapid clone" sweet spot, but the model card notes longer
+        # references improve quality. Upstream accepts a (numpy, sr) tuple.
+        audio_arr, ref_sr = prepare_reference(request.voice_id, 24000, max_seconds=30)
 
         clone_kwargs: dict[str, Any] = {
             "text": request.text,

@@ -370,7 +370,7 @@ services:
       - HOME=/home/appuser
       - PYTHONPATH=/app
       # Whisper defaults — override in .env to switch to GPU mode.
-      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_MODEL=${WHISPER_MODEL:-small}
       - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
       - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
     healthcheck:

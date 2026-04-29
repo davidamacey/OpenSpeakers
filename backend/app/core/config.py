@@ -65,10 +65,16 @@ class Settings(BaseSettings):
     KOKORO_MODEL_PATH: str = "hexgrad/Kokoro-82M"
 
     # Reference-audio transcription (faster-whisper, runs in worker-asr).
-    # Default model is the 140 MB ``base`` checkpoint — fast on CPU and
-    # accurate enough for a transcript the user can edit. ``small`` /
-    # ``medium`` / ``large-v3-turbo`` are valid drop-ins for higher accuracy.
-    WHISPER_MODEL: str = "base"
+    # Default is the 460 MB ``small`` checkpoint — markedly more accurate than
+    # ``base`` on accented / noisy speech, still fast on CPU (~1-2 s for a 10 s
+    # clip in int8 mode). Available sizes (rough size / quality tradeoff):
+    #   - ``tiny``           (~75 MB) — fastest, lowest quality
+    #   - ``base``           (~140 MB) — fast, ok quality
+    #   - ``small``          (~460 MB) — balanced (default)
+    #   - ``medium``         (~1.5 GB) — better, slower CPU
+    #   - ``large-v3``       (~3 GB) — best, GPU recommended
+    #   - ``large-v3-turbo`` (~1.6 GB) — near-large quality, ~4x faster
+    WHISPER_MODEL: str = "small"
     WHISPER_DEVICE: str = "cpu"
     WHISPER_COMPUTE_TYPE: str = "int8"
     # Master kill switch for the ASR pipeline. When ``False``, voice profile

@@ -135,7 +135,8 @@ class DiaTTSModel(TTSModelBase):
             # Clean the reference clip and grab its actual duration so we can
             # head-trim the re-synth from the model's output later. Use a
             # cheap header read on the cached clean WAV instead of a second
-            # full preprocessing pass.
+            # full preprocessing pass. max_seconds=10 matches upstream's
+            # "best results with 5-10s of reference audio" guidance.
             cleaned_path = prepare_reference_to_file(voice_id, SAMPLE_RATE, max_seconds=10)
             ref_info = sf.info(str(cleaned_path))
             ref_duration_s = ref_info.frames / float(ref_info.samplerate)

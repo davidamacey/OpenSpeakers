@@ -1,10 +1,11 @@
 # open_speakers worker-asr — faster-whisper reference-audio transcription
 #
-# CPU-only by default — the `base` model loads in ~1 s and transcribes a
-# 10 s clip in a couple of seconds, with no GPU contention against the TTS
-# workers. To run on GPU 0 instead, set WHISPER_DEVICE=cuda and
-# WHISPER_COMPUTE_TYPE=int8_float16, and apply the GPU overlay fragment in
-# docker-compose.gpu.yml.
+# CPU-only by default — the `small` model loads in ~2 s and transcribes a
+# 10 s clip in 1-2 s on CPU (int8), with no GPU contention against the TTS
+# workers. Override via WHISPER_MODEL in .env (tiny/base/small/medium/
+# large-v3/large-v3-turbo). To run on GPU 0 instead, set WHISPER_DEVICE=cuda
+# and WHISPER_COMPUTE_TYPE=int8_float16, and apply the GPU overlay fragment
+# in docker-compose.gpu.yml.
 
 FROM python:3.12-slim AS base
 

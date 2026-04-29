@@ -228,7 +228,7 @@ class VibeVoice1p5BModel(TTSModelBase):
         """Load reference audio as voice_samples list for the processor.
 
         Uses the shared ``prepare_reference`` helper which handles mono conversion,
-        resample to 24 kHz, silence trim, loudness normalization, and a 30 s clip.
+        resample to 24 kHz, silence trim, loudness normalization, and a 60 s clip.
         Loudness normalization is the biggest win here — VibeVoice's voice
         tokenizer is sensitive to RMS.
         """
@@ -244,10 +244,12 @@ class VibeVoice1p5BModel(TTSModelBase):
 
         # Lets ReferenceAudioError propagate (e.g. clip < 3 s after trim) so the
         # user gets a clear error instead of a cryptic shape error downstream.
+        # max_seconds=60: upstream community fork (davidamacey/VibeVoice) accepts
+        # long references; more material lets the voice tokenizer capture prosody.
         arr, _sr = prepare_reference(
             ref_path,
             self.SAMPLE_RATE,
-            max_seconds=30,
+            max_seconds=60,
             min_seconds=3.0,
         )
         return [arr]
