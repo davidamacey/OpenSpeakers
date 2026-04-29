@@ -11,6 +11,8 @@ import logging
 import wave
 from pathlib import Path
 
+from app.core.config import settings
+from app.models._ref_audio import prepare_reference_to_file
 from app.models.base import GenerateRequest, GenerateResult, TTSModelBase
 
 logger = logging.getLogger(__name__)
@@ -22,7 +24,7 @@ class F5TTSModel(TTSModelBase):
     description = "Flow-matching TTS with zero-shot cloning and 15x realtime speed — MIT license"
     supports_voice_cloning = True
     supports_streaming = False
-    supports_speed = False
+    supports_speed = True
     supported_languages = ["en", "zh", "de", "fr", "es", "pt", "hi", "ar", "ru", "ja", "ko", "nl"]
     hf_repo = "SWivid/F5-TTS"
     vram_gb_estimate = 3.0
@@ -70,8 +72,10 @@ class F5TTSModel(TTSModelBase):
         # voice_id is a path to a reference audio file; fall back to bundled example
         ref_file = None
         ref_text = request.extra.get("ref_text", "")
+        using_user_ref = False
         if request.voice_id and Path(request.voice_id).exists():
             ref_file = request.voice_id
+            using_user_ref = True
         elif Path(self._DEFAULT_REF_AUDIO).exists():
             ref_file = self._DEFAULT_REF_AUDIO
             # Provide the known transcription to avoid Whisper download
@@ -83,11 +87,34 @@ class F5TTSModel(TTSModelBase):
                 "Pass voice_id pointing to a WAV/MP3 file, or use a cloned voice profile."
             )
 
+        # If we're on a user-uploaded reference with no transcript, decide whether
+        # we're allowed to fall back to F5's internal Whisper transcription pass.
+        # The setting may not exist on older configs — graceful degrade to True.
+        auto_transcribe = bool(getattr(settings, "F5_TTS_AUTO_TRANSCRIBE", True))
+        if using_user_ref and not ref_text:
+            if not auto_transcribe:
+                raise RuntimeError("F5-TTS requires reference_text — auto-transcribe is disabled.")
+            logger.warning(
+                "F5-TTS: no reference_text provided; upstream will run Whisper "
+                "auto-transcribe (slow on first call, downloads weights)."
+            )
+
+        # Pre-clean the reference (mono, 24 kHz, trimmed silence, normalized
+        # loudness, ≤12s) — F5-TTS hard-clips at 12s anyway.
+        cleaned_path = prepare_reference_to_file(ref_file, 24000, max_seconds=12)
+
         wav, sr, _ = self._model.infer(
-            ref_file=ref_file,
+            ref_file=str(cleaned_path),
             ref_text=ref_text,
             gen_text=request.text,
-            speed=1.0,  # F5-TTS API does not expose speed control
+            nfe_step=int(request.extra.get("nfe_step", 32)),
+            cfg_strength=float(request.extra.get("cfg_strength", 2.0)),
+            sway_sampling_coef=float(request.extra.get("sway_sampling_coef", -1.0)),
+            speed=request.speed,
+            target_rms=float(request.extra.get("target_rms", 0.1)),
+            cross_fade_duration=float(request.extra.get("cross_fade_duration", 0.15)),
+            remove_silence=bool(request.extra.get("remove_silence", False)),
+            seed=request.extra.get("seed"),
         )
 
         duration = len(wav) / sr if hasattr(wav, "__len__") else 0.0

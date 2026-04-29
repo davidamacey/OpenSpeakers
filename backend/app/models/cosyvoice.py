@@ -10,11 +10,10 @@ import io
 import logging
 from pathlib import Path
 
+from app.models._ref_audio import prepare_reference
 from app.models.base import GenerateRequest, GenerateResult, TTSModelBase
 
 logger = logging.getLogger(__name__)
-
-SAMPLE_RATE = 22050
 
 
 class CosyVoice2Model(TTSModelBase):
@@ -34,6 +33,10 @@ class CosyVoice2Model(TTSModelBase):
 
     def __init__(self) -> None:
         self._model = None
+        # Cache of voice_id -> bool, populated on first generation for that
+        # profile when no ref_text is available. Keyed by stable id (the
+        # voice_id path is effectively the profile id). Cleared on unload().
+        self._zero_shot_spk_cache: dict[str, bool] = {}
 
     _HF_MODEL_ID = "FunAudioLLM/CosyVoice2-0.5B"
 
@@ -76,6 +79,9 @@ class CosyVoice2Model(TTSModelBase):
     def unload(self) -> None:
         self._model = None
         self._loaded = False
+        # Cached zero-shot speakers reference state inside the model object —
+        # invalidate so the next load doesn't think they're still registered.
+        self._zero_shot_spk_cache.clear()
         try:
             import torch
 
@@ -100,31 +106,87 @@ class CosyVoice2Model(TTSModelBase):
         elif Path(self._DEFAULT_ZERO_SHOT_REF).exists():
             ref_audio = self._DEFAULT_ZERO_SHOT_REF
 
-        ref_text = request.extra.get("ref_text", "")
-        instruct_text = request.extra.get("instruct", "")
-
-        all_audio = []
-
-        if instruct_text and ref_audio:
-            # Voice design mode: shape voice with natural language instruction
-            for chunk in self._model.inference_instruct2(
-                request.text, instruct_text, ref_audio, stream=False
-            ):
-                all_audio.append(chunk["tts_speech"])
-        elif ref_audio:
-            # Zero-shot cloning with reference
-            for chunk in self._model.inference_zero_shot(
-                request.text, ref_text, ref_audio, stream=False
-            ):
-                all_audio.append(chunk["tts_speech"])
-        else:
+        if not ref_audio:
             raise RuntimeError(
                 "CosyVoice 2.0 requires a reference audio file. "
                 "Pass voice_id pointing to a WAV/MP3 file, or use a cloned voice profile."
             )
 
+        ref_text = (request.extra.get("ref_text") or "").strip()
+        instruct_text = request.extra.get("instruct", "")
+
+        # Pre-clean prompt to mono / 16 kHz / ≤30s for the prompt encoder; the
+        # model still emits at its native output rate (24 kHz for CosyVoice 2.0).
+        audio_arr, _ = prepare_reference(ref_audio, 16000, max_seconds=30)
+        prompt_speech_16k = torch.from_numpy(audio_arr).unsqueeze(0)
+
+        all_audio = []
+
+        if instruct_text:
+            # Voice-design mode: shape voice with a natural-language instruction.
+            # The instruct path always takes the cleaned prompt directly.
+            for chunk in self._model.inference_instruct2(
+                request.text, instruct_text, prompt_speech_16k, stream=False
+            ):
+                all_audio.append(chunk["tts_speech"])
+        elif ref_text:
+            # Zero-shot cloning with the user's reference transcript — the
+            # default upstream path.
+            for chunk in self._model.inference_zero_shot(
+                request.text,
+                prompt_text=ref_text,
+                prompt_wav=prompt_speech_16k,
+                stream=False,
+            ):
+                all_audio.append(chunk["tts_speech"])
+        else:
+            # No transcript available: use the upstream "saved zero-shot speaker"
+            # trick from cosyvoice2_example(). We register the speaker once per
+            # voice_id, then call inference_zero_shot with empty text fields and
+            # the cached speaker id. If add_zero_shot_spk rejects the empty
+            # prompt_text, fall back to passing the prompt_wav directly.
+            spk_id = str(request.voice_id or ref_audio)
+            registered = False
+            if not self._zero_shot_spk_cache.get(spk_id):
+                try:
+                    self._model.add_zero_shot_spk(
+                        prompt_text="",
+                        prompt_wav=prompt_speech_16k,
+                        zero_shot_spk_id=spk_id,
+                    )
+                    self._zero_shot_spk_cache[spk_id] = True
+                    registered = True
+                except Exception as exc:  # noqa: BLE001 — we have a fallback path
+                    logger.warning(
+                        "CosyVoice add_zero_shot_spk failed (%s); falling back to "
+                        "direct prompt_wav with empty prompt_text.",
+                        exc,
+                    )
+            else:
+                registered = True
+
+            if registered:
+                for chunk in self._model.inference_zero_shot(
+                    request.text,
+                    "",
+                    "",
+                    zero_shot_spk_id=spk_id,
+                    stream=False,
+                ):
+                    all_audio.append(chunk["tts_speech"])
+            else:
+                for chunk in self._model.inference_zero_shot(
+                    request.text,
+                    prompt_text="",
+                    prompt_wav=prompt_speech_16k,
+                    stream=False,
+                ):
+                    all_audio.append(chunk["tts_speech"])
+
         audio = torch.cat(all_audio, dim=-1)
-        sr = self._model.sample_rate if hasattr(self._model, "sample_rate") else SAMPLE_RATE
+        # CosyVoice 2.0 emits at 24 kHz — read the model's own property rather
+        # than hardcoding 22050 (was a ~9% pitch-shift bug).
+        sr = int(self._model.sample_rate)
         duration = audio.shape[-1] / sr
 
         buf = io.BytesIO()

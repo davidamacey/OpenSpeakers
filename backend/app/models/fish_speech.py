@@ -27,6 +27,7 @@ from typing import Any
 import numpy as np
 
 from app.core.config import settings
+from app.models._ref_audio import prepare_reference_to_file
 from app.models.base import GenerateRequest, GenerateResult, TTSModelBase
 
 logger = logging.getLogger(__name__)
@@ -46,6 +47,7 @@ class FishSpeechModel(TTSModelBase):
     description = "Fish Audio S2-Pro — zero-shot voice cloning, emotion tags, 80+ languages"
     supports_voice_cloning = True
     supports_streaming = False
+    supports_speed = True  # post-processed via librosa.effects.time_stretch
     supported_languages = ["en", "zh", "ja", "ko", "fr", "de", "ar", "es", "ru", "nl"]
     hf_repo = "fishaudio/s2-pro"
     vram_gb_estimate = 22.0
@@ -186,28 +188,39 @@ class FishSpeechModel(TTSModelBase):
         if not self._loaded or self._engine is None:
             raise RuntimeError("Fish Speech is not loaded")
 
-        # Build reference audio list for voice cloning
+        # Build reference audio list for voice cloning. Pre-clean the reference
+        # (mono, 44.1 kHz, trimmed silence, normalized loudness, ≤30s) before
+        # handing the bytes to Fish Speech — upstream pairs prompt tokens with
+        # prompt texts, so feeding both a clean clip and the transcript is what
+        # the inference engine actually expects.
+        ref_text = request.extra.get("ref_text", "")
         references: list = []
         if request.voice_id:
             ref_path = Path(request.voice_id)
             if ref_path.exists():
+                cleaned_path = prepare_reference_to_file(ref_path, 44100, max_seconds=30)
                 references.append(
                     ServeReferenceAudio(
-                        audio=ref_path.read_bytes(),
-                        text="",
+                        audio=cleaned_path.read_bytes(),
+                        text=ref_text,
                     )
                 )
 
-        tts_request = ServeTTSRequest(
-            text=request.text,
-            references=references,
-            max_new_tokens=2048,
-            temperature=request.extra.get("temperature", 0.7),
-            top_p=request.extra.get("top_p", 0.8),
-            repetition_penalty=request.extra.get("repetition_penalty", 1.1),
-            format="wav",
-            streaming=False,
-        )
+        tts_kwargs: dict[str, Any] = {
+            "text": request.text,
+            "references": references,
+            "max_new_tokens": 2048,
+            "temperature": request.extra.get("temperature", 0.7),
+            "top_p": request.extra.get("top_p", 0.8),
+            "repetition_penalty": request.extra.get("repetition_penalty", 1.1),
+            "format": "wav",
+            "streaming": False,
+        }
+        seed = request.extra.get("seed")
+        if seed is not None:
+            tts_kwargs["seed"] = int(seed)
+
+        tts_request = ServeTTSRequest(**tts_kwargs)
 
         # Collect audio segments from the generator
         # InferenceResult: code="header"|"segment"|"final"|"error"
@@ -233,6 +246,14 @@ class FishSpeechModel(TTSModelBase):
         full_audio = np.concatenate(audio_segments)
         if full_audio.dtype != np.float32:
             full_audio = full_audio.astype(np.float32)
+
+        # Fish Speech doesn't accept a speed kwarg — post-process with
+        # librosa.effects.time_stretch on the float audio array (not the bytes)
+        # when the request asks for non-1.0 speed.
+        if request.speed and abs(request.speed - 1.0) > 1e-3:
+            import librosa
+
+            full_audio = librosa.effects.time_stretch(full_audio, rate=request.speed)
 
         duration = len(full_audio) / sample_rate
 

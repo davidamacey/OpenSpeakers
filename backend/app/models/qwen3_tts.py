@@ -21,6 +21,7 @@ from typing import Any
 
 import numpy as np
 
+from app.models._ref_audio import prepare_reference
 from app.models.base import GenerateRequest, GenerateResult, TTSModelBase
 
 logger = logging.getLogger(__name__)
@@ -207,15 +208,27 @@ class Qwen3TTSModel(TTSModelBase):
                 attn_implementation=attn_impl,
             )
 
-        ref_text = request.extra.get("ref_text", "")
+        ref_text = (request.extra.get("ref_text") or "").strip()
+
+        # Pre-clean the reference (mono, 24 kHz, ≤15s — Qwen3 TTS advertises a
+        # "3-second rapid clone" sweet spot). Upstream accepts a (numpy, sr) tuple.
+        audio_arr, ref_sr = prepare_reference(request.voice_id, 24000, max_seconds=15)
+
+        clone_kwargs: dict[str, Any] = {
+            "text": request.text,
+            "language": language,
+            "ref_audio": (audio_arr, ref_sr),
+        }
+        if ref_text:
+            # Full-quality clone with transcript.
+            clone_kwargs["ref_text"] = ref_text
+        else:
+            # No transcript path documented in the README: omit ref_text and
+            # set x_vector_only_mode=True so only the speaker embedding is used.
+            clone_kwargs["x_vector_only_mode"] = True
 
         try:
-            wavs, sample_rate = self._clone_model.generate_voice_clone(
-                text=request.text,
-                language=language,
-                ref_audio=request.voice_id,
-                ref_text=ref_text,
-            )
+            wavs, sample_rate = self._clone_model.generate_voice_clone(**clone_kwargs)
         except Exception:
             # Clean up to prevent broken state — tts_tasks.py finally will
             # call unload_all() but we also clear here for safety.
