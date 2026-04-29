@@ -23,11 +23,13 @@ httpx>=0.27.0
 # Audio processing
 soundfile>=0.12.1
 numpy>=1.26.0
+librosa>=0.10.0  # used by app.models._ref_audio (silence trim) + /voices/{id}/test
 
-# Speaker-similarity scoring (Phase 5) — installed in worker-kokoro only.
-# Listed here for documentation; the API container does not need them.
+# Speaker-similarity scoring (Phase 5) — speechbrain is installed in worker-kokoro
+# only. The API container can import app.eval.similarity but cannot run it
+# without speechbrain; /voices/{id}/test will surface a clear error if invoked
+# directly here. Future: route that endpoint through a Celery task.
 # speechbrain>=1.0.0
-# librosa>=0.10.0
 
 # Reference-audio auto-transcription (Phase 1A) — installed in worker-asr only.
 # Listed here for documentation; the API container does not need it.

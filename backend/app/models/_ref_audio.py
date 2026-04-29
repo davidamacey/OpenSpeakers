@@ -111,7 +111,9 @@ def _to_mono(audio: np.ndarray) -> np.ndarray:
 
 
 def _resample(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
-    """Resample ``audio`` from ``orig_sr`` to ``target_sr`` using torchaudio."""
+    """Resample ``audio`` to ``target_sr``. Prefers torchaudio (fast, available
+    in worker containers); falls back to librosa when torch is absent (e.g., the
+    API container). Both produce comparable quality at speech rates."""
     if orig_sr == target_sr:
         return audio
     if orig_sr < 16_000:
@@ -120,19 +122,31 @@ def _resample(audio: np.ndarray, orig_sr: int, target_sr: int) -> np.ndarray:
             orig_sr,
             target_sr,
         )
-    import torch
-    import torchaudio.functional as F  # noqa: N812 — match torchaudio convention
+    try:
+        import torch
+        import torchaudio.functional as F  # noqa: N812 — match torchaudio convention
 
-    tensor = torch.from_numpy(audio.astype(np.float32)).unsqueeze(0)
-    resampled = F.resample(tensor, orig_sr, target_sr).squeeze(0).numpy()
-    return resampled
+        tensor = torch.from_numpy(audio.astype(np.float32)).unsqueeze(0)
+        return F.resample(tensor, orig_sr, target_sr).squeeze(0).numpy()
+    except ImportError:
+        import librosa
+
+        return librosa.resample(audio.astype(np.float32), orig_sr=orig_sr, target_sr=target_sr)
 
 
 def _trim_silence(audio: np.ndarray) -> np.ndarray:
-    """Trim leading and trailing silence using librosa's energy-based detector."""
+    """Trim leading and trailing silence using librosa's energy-based detector.
+
+    librosa's trim leaves an all-silence input untouched (it can't find a
+    non-silent region to anchor on). Catch that here so callers see an empty
+    array and the downstream ``min_seconds`` guard fires cleanly."""
     import librosa
 
     trimmed, _ = librosa.effects.trim(audio, top_db=_TRIM_TOP_DB)
+    if len(trimmed) > 0:
+        rms = float(np.sqrt(np.mean(trimmed.astype(np.float64) ** 2)))
+        if rms < _DEAD_CHANNEL_RMS:
+            return np.empty(0, dtype=audio.dtype)
     return trimmed
 
 
