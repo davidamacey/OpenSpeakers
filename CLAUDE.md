@@ -39,9 +39,15 @@ Each model group runs in its own container on a dedicated Celery queue:
 | `worker-orpheus` | `tts.orpheus` | Orpheus 3B | `Dockerfile.worker-orpheus` |
 | `worker-dia` | `tts.dia` | Dia 1.6B | `Dockerfile.worker-dia` |
 | `worker-f5` | `tts.f5-tts` | F5-TTS, Chatterbox, CosyVoice 2.0, Parler TTS Mini | `Dockerfile.worker-f5` |
+| `worker-asr` | `tts.asr` | faster-whisper reference transcription | `Dockerfile.worker-asr` |
 
 Queue routing is the single source of truth in `QUEUE_MAP` in
 `backend/app/api/endpoints/tts.py`.
+
+`worker-asr` is CPU-only by default (`WHISPER_DEVICE=cpu`, `WHISPER_COMPUTE_TYPE=int8`,
+`WHISPER_MODEL=small`). A commented override block in `docker-compose.gpu.yml` opts it
+into GPU mode. The task `asr.transcribe_reference` is dispatched from the voices POST
+handler whenever a profile is created without a manual transcript.
 
 All secondary workers inherit from `backend/Dockerfile.base-gpu` which provides:
 - PyTorch 2.10.0+cu128 and torchaudio
@@ -189,6 +195,11 @@ python3 scripts/test_all_models.py
 | `backend/app/models/qwen3_tts.py` | Qwen3 TTS 1.7B |
 | `backend/app/models/orpheus.py` | Orpheus 3B (vLLM backend) |
 | `backend/app/models/dia_tts.py` | Dia 1.6B dialogue model |
+| `backend/app/models/_ref_audio.py` | Shared reference-audio preprocessing helper |
+| `backend/app/asr/whisper.py` | faster-whisper singleton wrapper |
+| `backend/app/eval/similarity.py` | speechbrain ECAPA-TDNN cosine similarity |
+| `backend/app/tasks/asr_tasks.py` | `asr.transcribe_reference` (queue: `tts.asr`) |
+| `backend/app/tasks/eval_tasks.py` | `eval.compute_similarity` (queue: `tts.kokoro`) |
 | `backend/app/tasks/tts_tasks.py` | Celery tasks (generation + streaming) |
 | `backend/app/api/endpoints/tts.py` | TTS routes + QUEUE_MAP |
 | `backend/app/api/endpoints/openai_compat.py` | OpenAI /v1/audio/speech |
@@ -214,6 +225,11 @@ python3 scripts/test_all_models.py
 | `HF_TOKEN` | — | Required for gated models (Orpheus 3B) |
 | `BACKEND_PORT` | `8080` | Exposed API port |
 | `FRONTEND_PORT` | `5200` | Exposed UI port |
+| `WHISPER_MODEL` | `small` | faster-whisper model size (`tiny`/`base`/`small`/`medium`/`large-v3-turbo`) |
+| `WHISPER_DEVICE` | `cpu` | `cpu` or `cuda` |
+| `WHISPER_COMPUTE_TYPE` | `int8` | `int8` (CPU) or `int8_float16` (GPU) |
+| `AUTO_TRANSCRIBE_REFERENCES` | `true` | Master kill switch for reference auto-transcription |
+| `F5_TTS_AUTO_TRANSCRIBE` | `true` | When false, F5-TTS raises instead of falling back to its built-in Whisper |
 
 ## Service URLs (dev)
 
@@ -226,6 +242,76 @@ python3 scripts/test_all_models.py
 | PostgreSQL | localhost:5432 (127.0.0.1 only) |
 | Redis | localhost:6379 (127.0.0.1 only) |
 
+## Reference-audio preprocessing
+
+`backend/app/models/_ref_audio.py` exposes two helpers — every cloning model uses one
+of them:
+
+- `prepare_reference(path, target_sr, *, max_seconds, min_seconds, trim_silence,
+  normalize_loudness, target_rms) -> (np.ndarray, sr)` — when the model's API takes a
+  tensor / numpy array (CosyVoice's `prompt_speech_16k`, VibeVoice's voice samples).
+- `prepare_reference_to_file(path, target_sr, *, max_seconds, ...) -> Path` — when the
+  model's API takes a file path (Fish Speech, F5-TTS, Chatterbox, Dia, CosyVoice's
+  prompt-wav-as-path mode). Cleaned WAV is cached at
+  `${AUDIO_OUTPUT_DIR}/voices/_clean/{hash}.wav` keyed on
+  `(input_path_mtime, target_sr, max_seconds)`, so re-uploads invalidate automatically
+  and repeat generations skip the preprocessing pass.
+
+Both decode via soundfile with a librosa fallback (handles MP3/M4A/OPUS/AAC/WEBM),
+downmix to mono, resample with `torchaudio.functional.resample`, trim silence
+(`librosa.effects.trim`, top_db=30), loudness-normalize to a target RMS with a
+clip-safe scaling cap, and length-clip with a 50 ms cosine fade-out. They raise
+`ReferenceAudioError` on unreadable files, all-silence input, or post-trim length
+below `min_seconds`.
+
+Per-model sample rate / max length defaults (set by the calling model class):
+
+| Model | target_sr | max_seconds |
+|-------|-----------|-------------|
+| Fish Speech | 44100 | 30 |
+| F5-TTS | 24000 | 12 |
+| CosyVoice 2 | 24000 | 30 |
+| VibeVoice 1.5B | 24000 | 30 |
+| Qwen3 TTS | 24000 | 15 |
+| Chatterbox | 24000 | 15 |
+| Dia 1.6B | 44100 | 10 |
+
+## Speaker-similarity scoring
+
+`backend/app/eval/similarity.py` wraps `speechbrain/spkrec-ecapa-voxceleb` (192-dim
+ECAPA-TDNN embeddings, Apache-2.0). Lazy-loads the encoder on first call; cache lives
+under `${AUDIO_OUTPUT_DIR}/_models/speechbrain/spkrec-ecapa-voxceleb/` so cold starts
+don't re-download. Reference embeddings are computed once per `VoiceProfile` and
+persisted on `VoiceProfile.embedding_path` as a `.npy` file.
+
+The Celery task `eval.compute_similarity` runs on the **`tts.kokoro` queue** (the
+always-on lightweight worker — speechbrain is small and runs on CPU there, avoiding
+GPU contention with TTS workers). It is dispatched from the `generate_tts` finally
+block when both: (1) the job has a `voice_profile_id`, and (2) the job completed
+successfully. Result persists on `TTSJob.speaker_similarity` as a float in [-1, 1].
+Heuristic colour bands in the UI: green ≥ 0.5, amber 0.3–0.5, red < 0.3.
+
+## Voice-id resolution gotchas (in `tts_tasks.py`)
+
+Two bugs that bit us during the cloning overhaul; both live around `voice_id` /
+`voice_profile_id` resolution at the top of `generate_tts`:
+
+1. **`.npy` embeddings being passed as voice references.**
+   `VoiceProfile.embedding_path` is overloaded — the similarity scorer caches its
+   ECAPA reference embedding there as a `.npy`. The model code expects a path to a
+   reference *audio* file. The Celery task must explicitly skip any `embedding_path`
+   ending in `.npy` and fall back to `reference_audio_path`. See the comment block in
+   `backend/app/tasks/tts_tasks.py` around the `voice_artifact` resolution.
+2. **UUID not being rewritten to a path.** When the API submits a job with a
+   `VoiceProfile` UUID, both `job.voice_id` and `job.voice_profile_id` get the UUID.
+   The model receives a raw UUID string, `Path(voice_id).exists()` returns false, and
+   cloning silently falls back to the default voice. The task **must** resolve the
+   UUID to the profile's `reference_audio_path` (or cleaned cache path) before
+   invoking the model.
+
+If either of these regress, the symptom is a "successful" generation that sounds
+nothing like the reference and a similarity score below 0.2.
+
 ## DB Schema Notes
 
 `TTSJob` columns of note:
@@ -237,6 +323,14 @@ python3 scripts/test_all_models.py
 - `description` — optional free-text description
 - `tags` — JSON array of string tags
 - `reference_audio_path` — path to uploaded reference audio file
+- `reference_text` — auto-transcribed (or manually edited) reference transcript
+- `reference_text_status` — `pending` / `ready` / `failed` / `manual`
+- `reference_language` — language code Whisper detected
+- `embedding_path` — `.npy` path of the cached ECAPA reference embedding (do **not**
+  pass to TTS models as `voice_id` — see "Voice-id resolution gotchas" above)
+
+`TTSJob.speaker_similarity` — float in [-1, 1], cosine similarity between the cleaned
+reference and the generated audio (populated by `eval.compute_similarity`).
 
 ## Known Limitations / Deferred
 

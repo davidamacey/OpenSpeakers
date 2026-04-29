@@ -44,8 +44,11 @@ with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKi
 - **Output formats** — WAV, MP3, OGG (ffmpeg transcoding)
 
 ### Voice Cloning
-- **Zero-shot cloning** — Fish Audio S2-Pro, VibeVoice 1.5B, and Qwen3 TTS clone from any 3–30 second reference clip
-- **Voice profiles** — store reference audio and metadata; reuse across any generation
+- **Seven cloning-capable models** — Fish Audio S2-Pro, F5-TTS, CosyVoice 2, VibeVoice 1.5B, Qwen3 TTS, Chatterbox, Dia 1.6B
+- **Auto-transcription of reference audio** — `worker-asr` runs faster-whisper on every uploaded clip; user can edit the result
+- **Speaker-similarity scoring** — every cloning job returns an ECAPA-TDNN cosine score so you can verify the clone
+- **Shared reference preprocessing** — single helper handles mono downmix, resample, silence trim, and loudness normalization per model
+- **Voice profiles** — store reference audio, transcript, and language; reuse across any generation
 - **50+ built-in voices** — Kokoro's preset voice library
 - **Emotion and style control** — Fish S2-Pro `[whisper]` / `[excited]` tags; Orpheus `<laugh>` / `<sigh>` / `<gasp>` tags
 - **Dialogue mode** — Dia 1.6B `[S1]` / `[S2]` multi-speaker scripting with nonverbal sounds
@@ -88,6 +91,94 @@ with GPU hot-swap, async job queuing, real-time streaming, and a modern SvelteKi
 | **Chatterbox** | `worker-f5` | `tts.f5-tts` | ~5 GB | Zero-shot | — | ✅ Working |
 | **CosyVoice 2.0** | `worker-f5` | `tts.f5-tts` | ~5 GB | Zero-shot | — | ✅ Working |
 | **Parler TTS Mini** | `worker-f5` | `tts.f5-tts` | ~3 GB | — | — | ✅ Working |
+
+---
+
+## Voice Cloning
+
+OpenSpeakers ships with seven cloning-capable models. Upload one reference clip per
+voice profile and reuse it across any of them. Reference transcripts are captured
+**automatically** via faster-whisper running in the dedicated `worker-asr` container —
+no manual typing required, but the user can edit if Whisper gets a word wrong.
+
+### Quick start
+
+1. Open **http://localhost:5200/clone**
+2. Drag-and-drop or pick a 15–30 second mono recording of the target speaker (WAV / MP3 /
+   M4A / OPUS / FLAC accepted)
+3. Click **Save**. The profile appears with a `Transcribing…` badge for 1–3 seconds, then
+   flips to `✓ Transcribed`
+4. Review the auto-detected transcript in the editable textarea. Edit if needed (the
+   badge changes to `✎ Edited`) or click **Re-transcribe** to retry
+5. Open **/tts**, pick any cloning-capable model, select your voice profile, and generate
+6. The completed job shows a **Voice match** badge with the speaker-similarity score
+
+### Reference-text status flow
+
+| Status | Meaning |
+|--------|---------|
+| `pending` | ASR task is queued or running (typically <3 s) |
+| `ready` | Whisper succeeded; transcript ready for use |
+| `failed` | Whisper returned empty (all silence, dropped by VAD) — UI prompts the user to type a transcript or re-record |
+| `manual` | User typed or edited the transcript — auto-transcription will not overwrite it |
+
+A grace period (≤5 s) in the generation pipeline lets in-flight ASR tasks land before the
+worker reads `reference_text`. After the grace period each model falls back to its
+"no transcript" path (Qwen3 `x_vector_only_mode=True`, CosyVoice's `add_zero_shot_spk`
+cache, Fish Speech disables cloning, Dia raises a clear error).
+
+### Speaker-similarity score
+
+Every completed cloning job runs through a `speechbrain/spkrec-ecapa-voxceleb`
+embedder (192-dim ECAPA-TDNN) and the cosine similarity between the reference and
+generated clips is persisted on `TTSJob.speaker_similarity`. Reference embeddings are
+cached on `VoiceProfile.embedding_path` as `.npy` files; the speechbrain weights cache
+under `${AUDIO_OUTPUT_DIR}/_models/speechbrain/spkrec-ecapa-voxceleb/`. The scorer runs
+on CPU inside `worker-kokoro` (the always-on lightweight worker) on the `tts.kokoro`
+queue, so it never contends with the TTS GPUs.
+
+Interpretation:
+
+| Score | Verdict |
+|------:|---------|
+| ≥ 0.5 | Same speaker — recognisable clone |
+| 0.3 – 0.5 | Ambiguous — partial timbre match, different speaker is plausible |
+| < 0.3 | Different speaker — clone is broken or reference is unusable |
+
+### Per-model cloning notes
+
+| Model | Recommended ref length | Transcript | Typical ceiling | Notes |
+|-------|------------------------|------------|-----------------|-------|
+| **Fish Audio S2-Pro** | 10–30 s | Required* | ~0.62 | *Empty transcript silently disables cloning upstream. Auto-ASR is enough. |
+| **F5-TTS** | 5–12 s | Required (auto-ASR fills it) | ~0.58 | Reference is hard-clipped to 12 s by the upstream library. Set `F5_TTS_AUTO_TRANSCRIBE=false` to fail fast instead of falling back to F5's internal Whisper download. |
+| **CosyVoice 2** | 5–30 s | Optional | ~0.61 | When transcript missing, uses upstream's `add_zero_shot_spk` cache trick. |
+| **VibeVoice 1.5B** | 3–30 s | Not used | ~0.57 | Voice tokenizer is sensitive to RMS — preprocessing helper normalises loudness. Minimum 3 s after silence trim. |
+| **Qwen3 TTS 1.7B** | 3–15 s | Optional | ~0.55 | If transcript missing, sets `x_vector_only_mode=True` (slightly lower fidelity but consistent). |
+| **Chatterbox** | 5–15 s | Not used | ~0.52 | Internally resamples to 16 kHz; we feed 24 kHz mono. |
+| **Dia 1.6B** | 5–10 s | **Required** | ~0.35 | Dia is a multi-speaker dialogue model — single-speaker similarity ceiling is ~0.35 even with a perfect reference. Transcript must be present (the prompt prefix is `[S1] {ref_text} {gen_text}`); the head of the output is trimmed by the reference duration so users only hear the new text. |
+
+### Reference audio guidelines
+
+- **Mono** — stereo files are auto-downmixed; the louder channel wins if one side is
+  silent
+- **Clean studio recording** — no background music, no heavy compression, no reverb
+- **Single speaker** — multi-speaker references produce muddled embeddings
+- **15–30 seconds** is the sweet spot; very short clips (<3 s) trip Whisper's VAD and
+  may fail validation; very long clips are clipped per-model with a fade-out
+- **Emotional variety helps** — a flat read clones a flat speaker
+- **No phone-quality audio** — 8 kHz uploads are upsampled but sound thin
+- Accepted formats: WAV, MP3, M4A, OPUS, FLAC, OGG (libsndfile-backed with a librosa
+  fallback)
+
+### Configuration
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WHISPER_MODEL` | `small` | One of `tiny` / `base` / `small` / `medium` / `large-v3-turbo` |
+| `WHISPER_DEVICE` | `cpu` | `cpu` or `cuda` (GPU mode requires uncommenting the override block) |
+| `WHISPER_COMPUTE_TYPE` | `int8` | `int8` for CPU; `int8_float16` for GPU |
+| `AUTO_TRANSCRIBE_REFERENCES` | `true` | Master kill switch — set false to require manual transcripts |
+| `F5_TTS_AUTO_TRANSCRIBE` | `true` | When false, F5-TTS raises instead of falling back to its built-in Whisper download |
 
 ---
 
@@ -243,6 +334,8 @@ Edit `.env` to customize:
 | `GET` | `/api/voices/{id}/audio` | Stream the reference audio file |
 | `DELETE` | `/api/voices/{id}` | Delete profile and reference audio |
 | `GET` | `/api/voices/builtin/{model_id}` | List built-in preset voices for a model |
+| `POST` | `/api/voices/{id}/transcribe` | Re-run faster-whisper on the reference audio |
+| `POST` | `/api/voices/{id}/test` | Score an uploaded clip against the stored reference (returns cosine similarity) |
 
 ### Models
 
@@ -357,9 +450,16 @@ memory, Python dependencies, and container build complexity.
 | `worker-orpheus` | `tts.orpheus` | Orpheus 3B | `Dockerfile.worker-orpheus` |
 | `worker-dia` | `tts.dia` | Dia 1.6B | `Dockerfile.worker-dia` |
 | `worker-f5` | `tts.f5-tts` | F5-TTS, Chatterbox, CosyVoice 2.0, Parler TTS Mini | `Dockerfile.worker-f5` |
+| `worker-asr` | `tts.asr` | faster-whisper (reference transcription) | `Dockerfile.worker-asr` |
 
 The FastAPI backend **never touches the GPU**. Only Celery workers load ML models. Queue
 routing is the single source of truth in `QUEUE_MAP` in `backend/app/api/endpoints/tts.py`.
+
+`worker-asr` is **CPU-only by default** — the `small` Whisper model transcribes a 10–30 s
+reference clip in 1–3 s on a modern CPU and avoids GPU contention with the TTS workers.
+Operators with spare VRAM can opt into GPU mode by uncommenting the
+`worker-asr` block in `docker-compose.gpu.yml` and setting `WHISPER_DEVICE=cuda` and
+`WHISPER_COMPUTE_TYPE=int8_float16` in `.env`.
 
 All secondary workers inherit from `backend/Dockerfile.base-gpu` which provides:
 - PyTorch 2.10.0+cu128 and torchaudio
@@ -395,10 +495,14 @@ open_speakers/
 │   ├── Dockerfile.worker-orpheus    # Orpheus 3B worker (vLLM)
 │   ├── Dockerfile.worker-dia        # Dia 1.6B worker
 │   ├── Dockerfile.worker-f5         # F5-TTS / Chatterbox / CosyVoice worker
+│   ├── Dockerfile.worker-asr        # faster-whisper reference transcription worker
 │   └── app/
 │       ├── api/endpoints/           # REST API routes + OpenAI compat
 │       ├── models/                  # TTS model implementations + ModelManager
-│       ├── tasks/                   # Celery tasks (generation, streaming)
+│       │   └── _ref_audio.py        # Shared reference-audio preprocessing helper
+│       ├── tasks/                   # Celery tasks (generation, ASR, similarity)
+│       ├── asr/                     # faster-whisper singleton wrapper
+│       ├── eval/                    # speechbrain ECAPA similarity scorer
 │       ├── db/                      # SQLAlchemy ORM models + Alembic
 │       └── schemas/                 # Pydantic v2 schemas
 ├── frontend/src/
@@ -438,6 +542,11 @@ Copy `.env.example` to `.env` and adjust as needed:
 | `FRONTEND_PORT` | `5200` | Exposed frontend port |
 | `DATABASE_URL` | auto | Full PostgreSQL connection string (overrides individual vars) |
 | `CELERY_BROKER_URL` | auto | Redis broker URL (overrides default) |
+| `WHISPER_MODEL` | `small` | faster-whisper model size for reference auto-transcription |
+| `WHISPER_DEVICE` | `cpu` | `cpu` or `cuda` for the ASR worker |
+| `WHISPER_COMPUTE_TYPE` | `int8` | `int8` for CPU, `int8_float16` for GPU |
+| `AUTO_TRANSCRIBE_REFERENCES` | `true` | Master switch for auto-transcription |
+| `F5_TTS_AUTO_TRANSCRIBE` | `true` | If false, F5-TTS fails fast on missing transcript |
 
 ---
 
