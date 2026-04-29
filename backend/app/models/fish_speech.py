@@ -304,7 +304,7 @@ class FishSpeechModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, _name: str) -> dict:
+    def clone_voice(self, audio_path: str, name: str = "") -> dict:  # noqa: ARG002
         """Fish Speech performs zero-shot cloning at inference time.
 
         No separate embedding extraction needed — the reference audio path

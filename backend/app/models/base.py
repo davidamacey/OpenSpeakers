@@ -92,7 +92,7 @@ class TTSModelBase(ABC):
         """
         raise NotImplementedError(f"{self.model_id} does not support streaming generation")
 
-    def clone_voice(self, audio_path: str, _name: str) -> dict:
+    def clone_voice(self, audio_path: str, name: str = "") -> dict:  # noqa: ARG002
         """Create a voice profile from reference audio.
 
         Returns a dict of model-specific metadata to be stored alongside

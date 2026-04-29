@@ -299,7 +299,7 @@ class VibeVoiceModel(TTSModelBase):
             if errors:
                 raise errors[0]
 
-    def clone_voice(self, audio_path: str, _name: str) -> dict:
+    def clone_voice(self, audio_path: str, name: str = "") -> dict:  # noqa: ARG002
         raise NotImplementedError(
             "VibeVoice 0.5B (Realtime) does not support voice cloning. "
             "Use VibeVoice 1.5B for zero-shot voice cloning."

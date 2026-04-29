@@ -208,7 +208,7 @@ class VibeVoice1p5BModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, _name: str) -> dict:
+    def clone_voice(self, audio_path: str, name: str = "") -> dict:  # noqa: ARG002
         """Store reference audio path for zero-shot cloning at generate time.
 
         The 1.5B model does zero-shot voice cloning by passing voice_samples

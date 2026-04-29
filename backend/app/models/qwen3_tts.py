@@ -255,7 +255,7 @@ class Qwen3TTSModel(TTSModelBase):
             format="wav",
         )
 
-    def clone_voice(self, audio_path: str, _name: str) -> dict:
+    def clone_voice(self, audio_path: str, name: str = "") -> dict:  # noqa: ARG002
         """Qwen3 TTS performs zero-shot cloning at inference time.
 
         We just store the reference audio path — the cloning happens
