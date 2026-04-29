@@ -69,8 +69,9 @@ class DiaTTSModel(TTSModelBase):
         from pathlib import Path
 
         import numpy as np
+        import soundfile as sf
 
-        from app.models._ref_audio import prepare_reference, prepare_reference_to_file
+        from app.models._ref_audio import prepare_reference_to_file
 
         # Cloning is requested when voice_id is a path to an existing audio file.
         voice_id = request.voice_id
@@ -92,10 +93,12 @@ class DiaTTSModel(TTSModelBase):
                 )
 
             # Clean the reference clip and grab its actual duration so we can
-            # head-trim the re-synth from the model's output later.
+            # head-trim the re-synth from the model's output later. Use a
+            # cheap header read on the cached clean WAV instead of a second
+            # full preprocessing pass.
             cleaned_path = prepare_reference_to_file(voice_id, SAMPLE_RATE, max_seconds=10)
-            cleaned_arr, cleaned_sr = prepare_reference(voice_id, SAMPLE_RATE, max_seconds=10)
-            ref_duration_s = len(cleaned_arr) / cleaned_sr
+            ref_info = sf.info(str(cleaned_path))
+            ref_duration_s = ref_info.frames / float(ref_info.samplerate)
 
             # Per upstream example/voice_clone.py: prepend the transcript of the
             # reference audio (with speaker tag) before the new text, and pass

@@ -10,14 +10,18 @@ from __future__ import annotations
 
 import logging
 import uuid
+from typing import TYPE_CHECKING
 
 from app.core.celery import celery_app
 from app.db.models import VoiceProfile
 
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from sqlalchemy.orm import Session
+
 logger = logging.getLogger(__name__)
 
 
-def _get_db():
+def _get_db() -> Session:
     """Create a standalone DB session (not a FastAPI dependency)."""
     from app.core.database import SessionLocal
 

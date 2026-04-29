@@ -18,6 +18,7 @@ from __future__ import annotations
 import logging
 import uuid
 from pathlib import Path
+from typing import TYPE_CHECKING
 
 import numpy as np
 
@@ -25,10 +26,13 @@ from app.core.celery import celery_app
 from app.core.config import settings
 from app.db.models import TTSJob, VoiceProfile
 
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    from sqlalchemy.orm import Session
+
 logger = logging.getLogger(__name__)
 
 
-def _get_db():
+def _get_db() -> Session:
     """Create a standalone DB session (matches tts_tasks.py pattern)."""
     from app.core.database import SessionLocal
 
@@ -61,7 +65,7 @@ def _embedding_cache_path(profile_id: uuid.UUID) -> Path:
 
 
 def _load_or_compute_reference_embedding(
-    db, profile: VoiceProfile, ref_audio_path: str
+    db: Session, profile: VoiceProfile, ref_audio_path: str
 ) -> np.ndarray:
     """Return the reference embedding, caching it on ``VoiceProfile.embedding_path``."""
     from app.eval.similarity import speaker_embedding

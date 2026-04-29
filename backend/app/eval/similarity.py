@@ -18,10 +18,14 @@ from __future__ import annotations
 import logging
 import threading
 from pathlib import Path
+from typing import TYPE_CHECKING, Any
 
 import numpy as np
 
 from app.core.config import settings
+
+if TYPE_CHECKING:  # pragma: no cover — typing only
+    import torch
 
 logger = logging.getLogger(__name__)
 
@@ -43,7 +47,7 @@ def _savedir() -> str:
     return str(Path(settings.MODEL_CACHE_DIR) / "speechbrain" / "spkrec-ecapa-voxceleb")
 
 
-def _get_model():
+def _get_model() -> Any:
     """Lazy-load the speechbrain EncoderClassifier singleton (CPU)."""
     global _model
     if _model is not None:
@@ -80,7 +84,7 @@ def _l2_normalize(vec: np.ndarray) -> np.ndarray:
     return (vec / norm).astype(np.float32, copy=False)
 
 
-def _load_audio_mono_16k(audio_path: str | Path):
+def _load_audio_mono_16k(audio_path: str | Path) -> torch.Tensor:
     """Load audio file → mono float32 tensor at 16 kHz, padded to ≥ _MIN_SECONDS."""
     import torch
     import torchaudio

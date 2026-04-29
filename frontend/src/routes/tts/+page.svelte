@@ -610,10 +610,12 @@
               : score >= 0.3
                 ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
                 : 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300'}
+          {@const tierLabel = score >= 0.5 ? 'good match' : score >= 0.3 ? 'fair match' : 'weak match'}
           <div class="flex items-center gap-2">
             <span
               class="inline-flex items-center text-xs px-2 py-1 rounded-full font-medium {tier}"
-              title="Cosine similarity between the generated audio and the reference voice (range -1 to 1)"
+              title="Cosine similarity between the generated audio and the reference voice (range -1 to 1; ≥0.5 typically means same speaker)"
+              aria-label={`Voice match score ${score.toFixed(2)} out of 1.0 — ${tierLabel} to the reference voice`}
             >
               Voice match: {score.toFixed(2)}
             </span>

@@ -151,7 +151,7 @@ def _length_clip(audio: np.ndarray, max_samples: int, sr: int) -> np.ndarray:
     if len(audio) <= max_samples:
         return audio
 
-    logger.info(
+    logger.debug(
         "reference audio is %.1fs; clipping to %.1fs for this model",
         len(audio) / sr,
         max_samples / sr,

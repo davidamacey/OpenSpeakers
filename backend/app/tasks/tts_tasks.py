@@ -36,23 +36,27 @@ def _get_db():
     return SessionLocal()
 
 
-def _wait_for_transcript(profile_id, db, timeout_s: float = 5.0) -> None:
+def _wait_for_transcript(profile: VoiceProfile, db, timeout_s: float = 5.0) -> None:
     """Briefly poll the DB for ASR completion before generation kicks off.
 
     The auto-transcribe pipeline normally finishes well before the user
     submits a TTS job, but a short clip uploaded immediately followed by a
-    generate request can race the ASR task. We poll every 250 ms up to
-    ``timeout_s`` and return silently on timeout — downstream models still
-    have their no-transcript fallback paths.
+    generate request can race the ASR task. We refresh the existing
+    ``profile`` row every 250 ms up to ``timeout_s`` and return silently on
+    timeout — downstream models still have their no-transcript fallback
+    paths. Using ``db.refresh`` avoids issuing a fresh SELECT each tick.
     """
     deadline = time.monotonic() + max(0.0, timeout_s)
     while time.monotonic() < deadline:
-        profile = db.query(VoiceProfile).filter(VoiceProfile.id == profile_id).first()
-        if profile is None:
-            return
         if profile.reference_text_status != "pending":
             return
         time.sleep(0.25)
+        try:
+            db.refresh(profile)
+        except Exception:
+            # Row deleted out from under us, or session error — give up
+            # quietly; downstream models have a no-transcript fallback.
+            return
 
 
 def _pub(job_id: str, event: dict) -> None:
@@ -136,8 +140,7 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         # briefly (5 s cap) for it to land, then refresh the profile. A
         # caller-supplied ``ref_text`` always wins.
         if profile and profile.reference_text_status == "pending":
-            _wait_for_transcript(profile.id, db, timeout_s=5.0)
-            db.refresh(profile)
+            _wait_for_transcript(profile, db, timeout_s=5.0)
         if profile and profile.reference_text and "ref_text" not in extra:
             extra["ref_text"] = profile.reference_text
 
