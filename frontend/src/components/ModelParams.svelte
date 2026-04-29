@@ -21,6 +21,7 @@
   let ddpmSteps = $state(5);
   // VibeVoice 1.5B defaults
   let cfgScale1p5b = $state(3.0);
+  let ddpmSteps1p5b = $state(20);
   let speakerId = $state(0);
   // Fish Speech defaults
   let temperature = $state(0.7);
@@ -31,21 +32,40 @@
   // Chatterbox defaults
   let exaggeration = $state(0.5);
   let cfgWeight = $state(0.5);
+  let chatterboxTemperature = $state(0.8);
+  let chatterboxTopP = $state(1.0);
+  let chatterboxMinP = $state(0.05);
+  let chatterboxRepPenalty = $state(1.2);
   // Orpheus defaults
   let orpheusTemperature = $state(0.6);
   let orpheusTopP = $state(0.95);
   // F5-TTS defaults
   let f5RefText = $state('');
+  let f5NfeStep = $state(32);
+  let f5CfgStrength = $state(2.0);
+  let f5SwaySamplingCoef = $state(-1.0);
+  let f5TargetRms = $state(0.1);
+  let f5RemoveSilence = $state(false);
+  // Dia 1.6B defaults
+  let diaCfgScale = $state(4.0);
+  let diaTemperature = $state(1.8);
+  let diaTopP = $state(0.9);
+  let diaCfgFilterTopK = $state(50);
   // CosyVoice 2.0 defaults
   let cosyRefText = $state('');
   let cosyInstruct = $state('');
+  // Optional per-job seed (string so empty == no seed). Persists across model
+  // switches deliberately — users testing reproducibility usually want to
+  // keep the same seed.
+  let seed = $state('');
 
-  // Reset all params to defaults when model changes
+  // Reset all params to defaults when model changes. Seed is preserved.
   $effect(() => {
     const _m = modelId;
     cfgScale = 1.5;
     ddpmSteps = 5;
     cfgScale1p5b = 3.0;
+    ddpmSteps1p5b = 20;
     speakerId = 0;
     temperature = 0.7;
     topP = 0.8;
@@ -53,45 +73,98 @@
     instruct = '';
     exaggeration = 0.5;
     cfgWeight = 0.5;
+    chatterboxTemperature = 0.8;
+    chatterboxTopP = 1.0;
+    chatterboxMinP = 0.05;
+    chatterboxRepPenalty = 1.2;
     orpheusTemperature = 0.6;
     orpheusTopP = 0.95;
     f5RefText = '';
+    f5NfeStep = 32;
+    f5CfgStrength = 2.0;
+    f5SwaySamplingCoef = -1.0;
+    f5TargetRms = 0.1;
+    f5RemoveSilence = false;
+    diaCfgScale = 4.0;
+    diaTemperature = 1.8;
+    diaTopP = 0.9;
+    diaCfgFilterTopK = 50;
     cosyRefText = '';
     cosyInstruct = '';
   });
+
+  // Inject seed only when non-empty. Parsed lazily so an in-progress edit
+  // ("12") doesn't pollute the request as NaN.
+  function withSeed(base: Record<string, unknown>): Record<string, unknown> {
+    const trimmed = seed.trim();
+    if (!trimmed) return base;
+    const parsed = Number(trimmed);
+    if (!Number.isFinite(parsed)) return base;
+    return { ...base, seed: Math.trunc(parsed) };
+  }
 
   // Sync extras from internal state
   $effect(() => {
     switch (modelId) {
       case 'vibevoice':
-        extras = { cfg_scale: cfgScale, ddpm_steps: ddpmSteps };
+        extras = withSeed({ cfg_scale: cfgScale, ddpm_steps: ddpmSteps });
         break;
       case 'vibevoice-1.5b':
-        extras = { cfg_scale: cfgScale1p5b, speaker_id: speakerId };
+        extras = withSeed({
+          cfg_scale: cfgScale1p5b,
+          ddpm_steps: ddpmSteps1p5b,
+          speaker_id: speakerId,
+        });
         break;
       case 'fish-speech-s2':
-        extras = { temperature, top_p: topP, repetition_penalty: repPenalty };
+        extras = withSeed({
+          temperature,
+          top_p: topP,
+          repetition_penalty: repPenalty,
+        });
         break;
       case 'qwen3-tts':
-        extras = instruct ? { instruct } : {};
+        extras = withSeed(instruct ? { instruct } : {});
         break;
       case 'chatterbox':
-        extras = { exaggeration, cfg_weight: cfgWeight };
+        extras = withSeed({
+          exaggeration,
+          cfg_weight: cfgWeight,
+          temperature: chatterboxTemperature,
+          top_p: chatterboxTopP,
+          min_p: chatterboxMinP,
+          repetition_penalty: chatterboxRepPenalty,
+        });
         break;
       case 'orpheus-3b':
-        extras = { temperature: orpheusTemperature, top_p: orpheusTopP };
+        extras = withSeed({ temperature: orpheusTemperature, top_p: orpheusTopP });
         break;
       case 'f5-tts':
-        extras = f5RefText ? { ref_text: f5RefText } : {};
+        extras = withSeed({
+          ...(f5RefText ? { ref_text: f5RefText } : {}),
+          nfe_step: f5NfeStep,
+          cfg_strength: f5CfgStrength,
+          sway_sampling_coef: f5SwaySamplingCoef,
+          target_rms: f5TargetRms,
+          remove_silence: f5RemoveSilence,
+        });
+        break;
+      case 'dia-1b':
+        extras = withSeed({
+          cfg_scale: diaCfgScale,
+          temperature: diaTemperature,
+          top_p: diaTopP,
+          cfg_filter_top_k: diaCfgFilterTopK,
+        });
         break;
       case 'cosyvoice-2':
-        extras = {
+        extras = withSeed({
           ...(cosyRefText ? { ref_text: cosyRefText } : {}),
           ...(cosyInstruct ? { instruct: cosyInstruct } : {}),
-        };
+        });
         break;
       default:
-        extras = {};
+        extras = withSeed({});
     }
   });
 </script>
@@ -161,28 +234,54 @@
 
 <!-- VibeVoice 1.5B -->
 {#if modelId === 'vibevoice-1.5b'}
-  <div>
-    <label class="label" for="cfg-scale-1p5b">
-      Voice Clarity: {cfgScale1p5b.toFixed(1)}
-      {#if cfgScale1p5b === 3.0}<span class="label-hint">(default)</span>{/if}
-      <span
-        class="label-hint cursor-help"
-        title="Lower = more creative variation. Higher = closer match to reference voice."
-      >&#9432;</span>
-    </label>
-    <input
-      id="cfg-scale-1p5b"
-      type="range"
-      min="1.0"
-      max="5.0"
-      step="0.1"
-      bind:value={cfgScale1p5b}
-      {disabled}
-      class="w-full"
-    />
-    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      How closely the output follows the voice reference
-    </p>
+  <div class="grid grid-cols-2 gap-4">
+    <div>
+      <label class="label" for="cfg-scale-1p5b">
+        Voice Clarity: {cfgScale1p5b.toFixed(1)}
+        {#if cfgScale1p5b === 3.0}<span class="label-hint">(default)</span>{/if}
+        <span
+          class="label-hint cursor-help"
+          title="Lower = more creative variation. Higher = closer match to reference voice."
+        >&#9432;</span>
+      </label>
+      <input
+        id="cfg-scale-1p5b"
+        type="range"
+        min="0.1"
+        max="10.0"
+        step="0.1"
+        bind:value={cfgScale1p5b}
+        {disabled}
+        class="w-full"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+        How closely the output follows the voice reference
+      </p>
+    </div>
+
+    <div>
+      <label class="label" for="ddpm-steps-1p5b">
+        Quality Steps: {ddpmSteps1p5b}
+        {#if ddpmSteps1p5b === 20}<span class="label-hint">(default)</span>{/if}
+        <span
+          class="label-hint cursor-help"
+          title="More steps refine the audio further. 10-15 for previews, 20 default, 30-50 for final output."
+        >&#9432;</span>
+      </label>
+      <input
+        id="ddpm-steps-1p5b"
+        type="range"
+        min="1"
+        max="50"
+        step="1"
+        bind:value={ddpmSteps1p5b}
+        {disabled}
+        class="w-full"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+        More steps = better quality, slower generation
+      </p>
+    </div>
   </div>
 
   <!-- Speaker ID selector -->
@@ -233,7 +332,7 @@
         id="fish-temperature"
         type="range"
         min="0.1"
-        max="1.0"
+        max="1.5"
         step="0.05"
         bind:value={temperature}
         {disabled}
@@ -259,7 +358,7 @@
         type="range"
         min="0.5"
         max="1.0"
-        step="0.05"
+        step="0.01"
         bind:value={topP}
         {disabled}
         class="w-full"
@@ -272,19 +371,19 @@
     <!-- Anti-Repetition -->
     <div>
       <label class="label" for="fish-rep-penalty">
-        Anti-Repetition: {repPenalty.toFixed(1)}
+        Anti-Repetition: {repPenalty.toFixed(2)}
         {#if repPenalty === 1.1}<span class="label-hint">(default)</span>{/if}
         <span
           class="label-hint cursor-help"
-          title="Increase to 1.3-1.5 if output sounds repetitive. Don't go above 1.8."
+          title="Increase to 1.2-1.5 if output sounds repetitive."
         >&#9432;</span>
       </label>
       <input
         id="fish-rep-penalty"
         type="range"
-        min="0.9"
-        max="2.0"
-        step="0.1"
+        min="1.0"
+        max="1.5"
+        step="0.01"
         bind:value={repPenalty}
         {disabled}
         class="w-full"
@@ -414,6 +513,98 @@
         Pacing / style control
       </p>
     </div>
+
+    <!-- Temperature -->
+    <div>
+      <label class="label" for="chatterbox-temperature">
+        Temperature: {chatterboxTemperature.toFixed(2)}
+        {#if chatterboxTemperature === 0.8}<span class="label-hint">(default)</span>{/if}
+        <span
+          class="label-hint cursor-help"
+          title="Sampling temperature. Lower = more deterministic, higher = more varied."
+        >&#9432;</span>
+      </label>
+      <input
+        id="chatterbox-temperature"
+        type="range"
+        min="0.1"
+        max="1.5"
+        step="0.05"
+        bind:value={chatterboxTemperature}
+        {disabled}
+        class="w-full"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Speech variation</p>
+    </div>
+
+    <!-- Top-p -->
+    <div>
+      <label class="label" for="chatterbox-top-p">
+        Top-p: {chatterboxTopP.toFixed(2)}
+        {#if chatterboxTopP === 1.0}<span class="label-hint">(default)</span>{/if}
+        <span
+          class="label-hint cursor-help"
+          title="Nucleus sampling. Higher = wider token pool."
+        >&#9432;</span>
+      </label>
+      <input
+        id="chatterbox-top-p"
+        type="range"
+        min="0.1"
+        max="1.0"
+        step="0.05"
+        bind:value={chatterboxTopP}
+        {disabled}
+        class="w-full"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Token diversity</p>
+    </div>
+
+    <!-- Min-p -->
+    <div>
+      <label class="label" for="chatterbox-min-p">
+        Min-p: {chatterboxMinP.toFixed(2)}
+        {#if chatterboxMinP === 0.05}<span class="label-hint">(default)</span>{/if}
+        <span
+          class="label-hint cursor-help"
+          title="Filters out low-probability tokens below this threshold."
+        >&#9432;</span>
+      </label>
+      <input
+        id="chatterbox-min-p"
+        type="range"
+        min="0.0"
+        max="0.5"
+        step="0.01"
+        bind:value={chatterboxMinP}
+        {disabled}
+        class="w-full"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Minimum-probability cutoff</p>
+    </div>
+
+    <!-- Repetition penalty -->
+    <div>
+      <label class="label" for="chatterbox-rep-penalty">
+        Anti-Repetition: {chatterboxRepPenalty.toFixed(2)}
+        {#if chatterboxRepPenalty === 1.2}<span class="label-hint">(default)</span>{/if}
+        <span
+          class="label-hint cursor-help"
+          title="Increase if the voice loops or stutters."
+        >&#9432;</span>
+      </label>
+      <input
+        id="chatterbox-rep-penalty"
+        type="range"
+        min="1.0"
+        max="2.0"
+        step="0.05"
+        bind:value={chatterboxRepPenalty}
+        {disabled}
+        class="w-full"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">Discourage repeated tokens</p>
+    </div>
   </div>
 
   <!-- Emotion tag helpers for Chatterbox -->
@@ -433,26 +624,124 @@
 
 <!-- F5-TTS -->
 {#if modelId === 'f5-tts'}
-  <div>
-    <label class="label" for="f5-ref-text">
-      Reference Transcript
-      <span
-        class="label-hint cursor-help"
-        title="Optional: provide the text spoken in the reference audio file. Improves cloning accuracy. Leave empty to auto-transcribe."
-      >&#9432;</span>
+  <div class="space-y-3">
+    <div>
+      <label class="label" for="f5-ref-text">
+        Reference Transcript
+        <span
+          class="label-hint cursor-help"
+          title="Optional: provide the text spoken in the reference audio file. Improves cloning accuracy. Leave empty to use the voice profile's stored transcript."
+        >&#9432;</span>
+      </label>
+      <input
+        id="f5-ref-text"
+        type="text"
+        bind:value={f5RefText}
+        {disabled}
+        maxlength={300}
+        placeholder="Optional: override the voice profile's transcript for this run"
+        class="input"
+      />
+      <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+        Leave empty to use the voice profile's auto-detected transcript.
+      </p>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label" for="f5-nfe-step">
+          Quality Steps: {f5NfeStep}
+          {#if f5NfeStep === 32}<span class="label-hint">(default)</span>{/if}
+          <span
+            class="label-hint cursor-help"
+            title="Number of denoising iterations. More = higher quality, slower."
+          >&#9432;</span>
+        </label>
+        <input
+          id="f5-nfe-step"
+          type="range"
+          min="8"
+          max="64"
+          step="1"
+          bind:value={f5NfeStep}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+
+      <div>
+        <label class="label" for="f5-cfg-strength">
+          CFG Strength: {f5CfgStrength.toFixed(1)}
+          {#if f5CfgStrength === 2.0}<span class="label-hint">(default)</span>{/if}
+          <span
+            class="label-hint cursor-help"
+            title="How closely the output follows the reference voice."
+          >&#9432;</span>
+        </label>
+        <input
+          id="f5-cfg-strength"
+          type="range"
+          min="0.5"
+          max="4.0"
+          step="0.1"
+          bind:value={f5CfgStrength}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+
+      <div>
+        <label class="label" for="f5-sway">
+          Sway Sampling: {f5SwaySamplingCoef.toFixed(1)}
+          {#if f5SwaySamplingCoef === -1.0}<span class="label-hint">(default)</span>{/if}
+          <span
+            class="label-hint cursor-help"
+            title="Upstream tuning knob — leave at default unless you know what you're doing."
+          >&#9432;</span>
+        </label>
+        <input
+          id="f5-sway"
+          type="range"
+          min="-1.0"
+          max="1.0"
+          step="0.1"
+          bind:value={f5SwaySamplingCoef}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+
+      <div>
+        <label class="label" for="f5-target-rms">
+          Target Loudness: {f5TargetRms.toFixed(2)}
+          {#if f5TargetRms === 0.1}<span class="label-hint">(default)</span>{/if}
+          <span
+            class="label-hint cursor-help"
+            title="Target RMS for output normalization."
+          >&#9432;</span>
+        </label>
+        <input
+          id="f5-target-rms"
+          type="range"
+          min="0.05"
+          max="0.3"
+          step="0.01"
+          bind:value={f5TargetRms}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+    </div>
+
+    <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300 cursor-pointer select-none">
+      <input
+        type="checkbox"
+        bind:checked={f5RemoveSilence}
+        {disabled}
+        class="accent-primary-500"
+      />
+      Remove silence from output
     </label>
-    <input
-      id="f5-ref-text"
-      type="text"
-      bind:value={f5RefText}
-      {disabled}
-      maxlength={300}
-      placeholder="Optional: transcript of the reference audio (e.g. 'The quick brown fox...')"
-      class="input"
-    />
-    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
-      Only used when a voice profile is selected. Leave empty for auto-transcription.
-    </p>
   </div>
 {/if}
 
@@ -527,14 +816,86 @@
 
 <!-- Dia 1.6B -->
 {#if modelId === 'dia-1b'}
-  <div class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-xs text-blue-700 dark:text-blue-300">
-    <svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-      <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
-    </svg>
-    <div class="space-y-1">
-      <p class="font-medium">Dialogue mode: Use [S1] and [S2] speaker tags</p>
-      <p>Example: <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">[S1] Hello there! [S2] How are you? [S1] I'm doing great!</code></p>
-      <p>Nonverbal sounds: <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(laughs)</code> <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(sighs)</code> <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(coughs)</code> <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(whispers)</code></p>
+  <div class="space-y-3">
+    <div class="flex items-start gap-2 p-3 rounded-lg bg-blue-50 dark:bg-blue-500/10 border border-blue-200 dark:border-blue-500/20 text-xs text-blue-700 dark:text-blue-300">
+      <svg class="w-3.5 h-3.5 flex-shrink-0 mt-0.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 16h-1v-4h-1m1-4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" />
+      </svg>
+      <div class="space-y-1">
+        <p class="font-medium">Dialogue mode: Use [S1] and [S2] speaker tags</p>
+        <p>Example: <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">[S1] Hello there! [S2] How are you? [S1] I'm doing great!</code></p>
+        <p>Nonverbal sounds: <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(laughs)</code> <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(sighs)</code> <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(coughs)</code> <code class="bg-blue-100 dark:bg-blue-900/40 px-1 rounded font-mono">(whispers)</code></p>
+      </div>
+    </div>
+
+    <div class="grid grid-cols-2 gap-4">
+      <div>
+        <label class="label" for="dia-cfg-scale">
+          CFG Scale: {diaCfgScale.toFixed(1)}
+          {#if diaCfgScale === 4.0}<span class="label-hint">(default)</span>{/if}
+        </label>
+        <input
+          id="dia-cfg-scale"
+          type="range"
+          min="1.0"
+          max="10.0"
+          step="0.1"
+          bind:value={diaCfgScale}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+
+      <div>
+        <label class="label" for="dia-temperature">
+          Temperature: {diaTemperature.toFixed(2)}
+          {#if diaTemperature === 1.8}<span class="label-hint">(default)</span>{/if}
+        </label>
+        <input
+          id="dia-temperature"
+          type="range"
+          min="0.1"
+          max="2.5"
+          step="0.05"
+          bind:value={diaTemperature}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+
+      <div>
+        <label class="label" for="dia-top-p">
+          Top-p: {diaTopP.toFixed(2)}
+          {#if diaTopP === 0.9}<span class="label-hint">(default)</span>{/if}
+        </label>
+        <input
+          id="dia-top-p"
+          type="range"
+          min="0.5"
+          max="1.0"
+          step="0.01"
+          bind:value={diaTopP}
+          {disabled}
+          class="w-full"
+        />
+      </div>
+
+      <div>
+        <label class="label" for="dia-cfg-filter-top-k">
+          CFG Filter Top-k: {diaCfgFilterTopK}
+          {#if diaCfgFilterTopK === 50}<span class="label-hint">(default)</span>{/if}
+        </label>
+        <input
+          id="dia-cfg-filter-top-k"
+          type="range"
+          min="10"
+          max="200"
+          step="1"
+          bind:value={diaCfgFilterTopK}
+          {disabled}
+          class="w-full"
+        />
+      </div>
     </div>
   </div>
 
@@ -666,5 +1027,31 @@
       <option value="An older male voice with a calm, authoritative tone reading at a measured pace.">Authoritative male</option>
       <option value="A child's voice speaking clearly and cheerfully at a moderate pace.">Child's voice</option>
     </select>
+  </div>
+{/if}
+
+<!-- Universal: optional seed -->
+{#if modelId && modelId !== 'kokoro'}
+  <div class="mt-3">
+    <label class="label" for="seed-input">
+      Seed
+      <span
+        class="label-hint cursor-help"
+        title="Optional integer for reproducible generation. Leave empty for random."
+      >&#9432;</span>
+    </label>
+    <input
+      id="seed-input"
+      type="number"
+      step="1"
+      value={seed}
+      oninput={(e) => (seed = (e.currentTarget as HTMLInputElement).value)}
+      {disabled}
+      placeholder="Leave empty for random"
+      class="input w-full sm:w-48"
+    />
+    <p class="text-xs text-gray-400 dark:text-gray-500 mt-1">
+      Same seed + same parameters = identical output (where supported).
+    </p>
   </div>
 {/if}

@@ -16,7 +16,11 @@
     created_at: string;
     completed_at: string | null;
     output_path: string | null;
+    speaker_similarity?: number | null;
   }
+
+  type SortKey = 'created_at' | 'similarity';
+  type SortDir = 'asc' | 'desc';
 
   let jobs = $state<Job[]>([]);
   let total = $state(0);
@@ -28,6 +32,9 @@
   let searchQuery = $state('');
   let searchTimeout: ReturnType<typeof setTimeout>;
   let expandedJobId = $state<string | null>(null);
+  // Client-side sort applied to the current page of results.
+  let sortKey = $state<SortKey>('created_at');
+  let sortDir = $state<SortDir>('desc');
 
   const STATUS_OPTIONS = [
     { value: 'all', label: 'All' },
@@ -105,6 +112,41 @@
   function truncateText(text: string, max = 80): string {
     return text.length > max ? text.slice(0, max) + '…' : text;
   }
+
+  function similarityClass(score: number | null | undefined): string {
+    if (score == null) return 'text-gray-500';
+    if (score >= 0.5) return 'text-green-400';
+    if (score >= 0.3) return 'text-amber-400';
+    return 'text-red-400';
+  }
+
+  function toggleSort(key: SortKey): void {
+    if (sortKey === key) {
+      sortDir = sortDir === 'asc' ? 'desc' : 'asc';
+    } else {
+      sortKey = key;
+      sortDir = key === 'similarity' ? 'desc' : 'desc';
+    }
+  }
+
+  // Client-side sort for the visible page. Server already returns
+  // newest-first; this re-sorts only the current page when the user picks a
+  // different column.
+  const sortedJobs = $derived.by(() => {
+    const arr = [...jobs];
+    arr.sort((a, b) => {
+      let cmp = 0;
+      if (sortKey === 'similarity') {
+        const av = a.speaker_similarity ?? -Infinity;
+        const bv = b.speaker_similarity ?? -Infinity;
+        cmp = av - bv;
+      } else {
+        cmp = new Date(a.created_at).getTime() - new Date(b.created_at).getTime();
+      }
+      return sortDir === 'asc' ? cmp : -cmp;
+    });
+    return arr;
+  });
 </script>
 
 <svelte:head><title>Job History — OpenSpeakers</title></svelte:head>
@@ -154,6 +196,27 @@
     <span class="text-gray-500 text-sm self-center">{total} jobs</span>
   </div>
 
+  <!-- Sort toggle row -->
+  {#if !loading && jobs.length > 0}
+    <div class="flex items-center gap-3 mb-2 text-xs text-gray-400">
+      <span>Sort:</span>
+      <button
+        type="button"
+        class="px-2 py-1 rounded transition-colors {sortKey === 'created_at' ? 'bg-gray-700 text-white' : 'hover:bg-gray-800'}"
+        onclick={() => toggleSort('created_at')}
+      >
+        Date {sortKey === 'created_at' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+      </button>
+      <button
+        type="button"
+        class="px-2 py-1 rounded transition-colors {sortKey === 'similarity' ? 'bg-gray-700 text-white' : 'hover:bg-gray-800'}"
+        onclick={() => toggleSort('similarity')}
+      >
+        Match {sortKey === 'similarity' ? (sortDir === 'asc' ? '▲' : '▼') : ''}
+      </button>
+    </div>
+  {/if}
+
   <!-- Job list -->
   {#if loading}
     <div class="flex justify-center py-12 text-gray-400">Loading…</div>
@@ -161,7 +224,7 @@
     <div class="text-center py-12 text-gray-400">No jobs found</div>
   {:else}
     <div class="space-y-2">
-      {#each jobs as job (job.id)}
+      {#each sortedJobs as job (job.id)}
         <div class="bg-gray-800 rounded-xl border border-gray-700 overflow-hidden">
           <!-- Job row -->
           <div class="flex items-center gap-3 px-4 py-3">
@@ -189,6 +252,16 @@
 
             <!-- Gen time -->
             <span class="text-xs text-gray-500 shrink-0 w-16 text-right">{formatGenTime(job.processing_time_ms)}</span>
+
+            <!-- Speaker similarity -->
+            <span
+              class="text-xs shrink-0 w-12 text-right tabular-nums {similarityClass(job.speaker_similarity)}"
+              title={job.speaker_similarity != null
+                ? `Voice match: ${job.speaker_similarity.toFixed(2)}`
+                : 'No similarity score (no voice profile or scoring not yet run)'}
+            >
+              {job.speaker_similarity != null ? job.speaker_similarity.toFixed(2) : '—'}
+            </span>
 
             <!-- Date -->
             <span class="text-xs text-gray-500 shrink-0 hidden md:block">{formatDate(job.created_at)}</span>

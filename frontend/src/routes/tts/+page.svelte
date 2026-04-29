@@ -406,11 +406,30 @@
               {#if clonedVoices.length > 0}
                 <optgroup label="My cloned voices">
                   {#each clonedVoices as v}
-                    <option value={v.id}>{v.name}</option>
+                    <option value={v.id}>
+                      {v.name} {v.reference_text ? '— ✓ Transcript' : '— ⚠ No transcript'}
+                    </option>
                   {/each}
                 </optgroup>
               {/if}
             </select>
+            <!-- Transcript-state hint for the currently selected cloned voice -->
+            {#if selectedVoiceId}
+              {@const sel = clonedVoices.find((v) => v.id === selectedVoiceId)}
+              {#if sel}
+                {#if sel.reference_text && sel.reference_text.length > 0}
+                  <p class="text-xs mt-1 text-green-600 dark:text-green-400">
+                    ✓ Transcript ready — better cloning quality
+                  </p>
+                {:else}
+                  <p class="text-xs mt-1 text-amber-600 dark:text-amber-400">
+                    ⚠ No transcript on this voice profile —
+                    <a href="/clone" class="underline hover:text-amber-500">add one on the Clone page</a>
+                    for higher cloning fidelity.
+                  </p>
+                {/if}
+              {/if}
+            {/if}
           {/if}
         </div>
       {/if}
@@ -581,6 +600,25 @@
 
         <!-- Audio player (shown once complete) -->
         <AudioPlayer src={audioUrl} duration={audioDuration} autoplay={audioAutoplay} />
+
+        <!-- Speaker similarity badge (Phase 5) -->
+        {#if currentJob?.status === 'complete' && currentJob.speaker_similarity != null}
+          {@const score = currentJob.speaker_similarity}
+          {@const tier =
+            score >= 0.5
+              ? 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300'
+              : score >= 0.3
+                ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
+                : 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300'}
+          <div class="flex items-center gap-2">
+            <span
+              class="inline-flex items-center text-xs px-2 py-1 rounded-full font-medium {tier}"
+              title="Cosine similarity between the generated audio and the reference voice (range -1 to 1)"
+            >
+              Voice match: {score.toFixed(2)}
+            </span>
+          </div>
+        {/if}
 
         {#if audioDuration}
           <p class="text-xs text-gray-400 dark:text-gray-600">

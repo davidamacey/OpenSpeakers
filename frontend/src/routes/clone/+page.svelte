@@ -11,6 +11,9 @@
     listVoices,
     deleteVoiceProfile,
     updateVoice,
+    getVoice,
+    transcribeVoice,
+    updateVoiceTranscript,
     getVoiceAudioUrl,
     type VoiceProfile,
   } from '$api/voices';
@@ -35,6 +38,18 @@
   let clonedVoices: VoiceProfile[] = $state([]);
   let loadingVoices = $state(false);
   let loadVoicesError = $state('');
+
+  // Just-created profile (for the inline transcript editor)
+  let createdVoice: VoiceProfile | null = $state(null);
+  // Transcript-edit state for the just-created voice
+  let transcriptDraft = $state('');
+  let transcriptSaving = $state(false);
+  let transcriptError = $state('');
+  // Polling tracking — only one in flight at a time. The interval is created
+  // inside an $effect so its cleanup runs on unmount or when we replace the
+  // active voice id.
+  let pollingVoiceId = $state<string | null>(null);
+  let pollingStartedAt = $state<number>(0);
 
   // Preview generation
   let previewText = $state('Hello, this is a test of my cloned voice.');
@@ -62,9 +77,112 @@
     }
   });
 
+  // Polling effect: while pollingVoiceId is set, GET /voices/{id} every 1 s
+  // and stop as soon as status leaves "pending" (or 30 s elapse).
+  $effect(() => {
+    const id = pollingVoiceId;
+    if (!id) return;
+    const startedAt = pollingStartedAt;
+    let cancelled = false;
+    const handle = setInterval(async () => {
+      if (cancelled) return;
+      try {
+        const fresh = await getVoice(id);
+        if (cancelled) return;
+        // Update the just-created card and the saved-voices list.
+        if (createdVoice && createdVoice.id === id) {
+          createdVoice = fresh;
+          if (fresh.reference_text_status !== 'pending') {
+            transcriptDraft = fresh.reference_text ?? '';
+          }
+        }
+        clonedVoices = clonedVoices.map((v) => (v.id === id ? fresh : v));
+        if (fresh.reference_text_status !== 'pending') {
+          pollingVoiceId = null;
+        } else if (Date.now() - startedAt > 30_000) {
+          pollingVoiceId = null;
+        }
+      } catch {
+        // Transient error — keep polling until the timeout elapses.
+        if (Date.now() - startedAt > 30_000) {
+          pollingVoiceId = null;
+        }
+      }
+    }, 1000);
+    return () => {
+      cancelled = true;
+      clearInterval(handle);
+    };
+  });
+
+  // Debounced PATCH for transcript edits.
+  let transcriptDebounceHandle: ReturnType<typeof setTimeout> | null = null;
+  $effect(() => {
+    return () => {
+      if (transcriptDebounceHandle !== null) clearTimeout(transcriptDebounceHandle);
+    };
+  });
+
+  // Strip control chars (≤0x1F) except \n, \t, \r — guards against pasted
+  // garbage from word processors.
+  function sanitizeTranscript(value: string): string {
+    let out = '';
+    for (const ch of value) {
+      const code = ch.charCodeAt(0);
+      if (code <= 0x1f && ch !== '\n' && ch !== '\t' && ch !== '\r') continue;
+      out += ch;
+    }
+    return out;
+  }
+
+  function handleTranscriptInput(e: Event): void {
+    if (!createdVoice) return;
+    const raw = (e.currentTarget as HTMLTextAreaElement).value;
+    const sanitized = sanitizeTranscript(raw);
+    if (sanitized !== raw) {
+      // Keep the textarea visually in sync with what we'll send.
+      (e.currentTarget as HTMLTextAreaElement).value = sanitized;
+    }
+    transcriptDraft = sanitized;
+    transcriptError = '';
+
+    if (transcriptDebounceHandle !== null) clearTimeout(transcriptDebounceHandle);
+    const voiceId = createdVoice.id;
+    transcriptDebounceHandle = setTimeout(async () => {
+      transcriptSaving = true;
+      try {
+        const updated = await updateVoiceTranscript(voiceId, transcriptDraft);
+        if (createdVoice && createdVoice.id === voiceId) {
+          createdVoice = updated;
+        }
+        clonedVoices = clonedVoices.map((v) => (v.id === voiceId ? updated : v));
+      } catch (err) {
+        transcriptError = err instanceof Error ? err.message : 'Failed to save transcript';
+      } finally {
+        transcriptSaving = false;
+      }
+    }, 500);
+  }
+
+  async function handleRetranscribe(): Promise<void> {
+    if (!createdVoice) return;
+    const voiceId = createdVoice.id;
+    transcriptError = '';
+    try {
+      const updated = await transcribeVoice(voiceId);
+      createdVoice = updated;
+      clonedVoices = clonedVoices.map((v) => (v.id === voiceId ? updated : v));
+      transcriptDraft = '';
+      pollingVoiceId = voiceId;
+      pollingStartedAt = Date.now();
+      addToast('info', 'Re-transcribing reference audio…');
+    } catch (err) {
+      transcriptError = err instanceof Error ? err.message : 'Failed to re-transcribe';
+    }
+  }
+
   onMount(async () => {
     await refreshModels();
-    // Default to first cloning-capable model
     if (voiceCloningModels().length > 0 && !selectedModel) {
       selectedModel = voiceCloningModels()[0].id;
     }
@@ -111,6 +229,7 @@
     try {
       const updated = await updateVoice(voiceId, { name: editingName });
       clonedVoices = clonedVoices.map((v) => (v.id === voiceId ? updated : v));
+      if (createdVoice && createdVoice.id === voiceId) createdVoice = updated;
       editingVoiceId = null;
       addToast('success', 'Voice renamed');
     } catch {
@@ -125,6 +244,15 @@
     try {
       const profile = await createVoiceProfile(voiceName.trim(), selectedModel, referenceFile!);
       clonedVoices = [profile, ...clonedVoices];
+      createdVoice = profile;
+      transcriptDraft = profile.reference_text ?? '';
+      transcriptError = '';
+      // Start polling for the auto-transcript only if the server hasn't
+      // already settled (e.g. user supplied a manual transcript via API).
+      if (profile.reference_text_status === 'pending') {
+        pollingVoiceId = profile.id;
+        pollingStartedAt = Date.now();
+      }
       // Reset form
       voiceName = '';
       referenceFile = null;
@@ -144,6 +272,10 @@
       await deleteVoiceProfile(voiceId);
       const deleted = clonedVoices.find((v) => v.id === voiceId);
       clonedVoices = clonedVoices.filter((v) => v.id !== voiceId);
+      if (createdVoice && createdVoice.id === voiceId) {
+        createdVoice = null;
+        pollingVoiceId = null;
+      }
       // Clear preview if the deleted voice was being previewed
       if (previewVoiceId === voiceId) {
         previewAudioUrl = '';
@@ -192,6 +324,37 @@
       month: 'short',
       day: 'numeric',
     });
+  }
+
+  // Badge styling for transcript state.
+  function transcriptBadgeClass(status: VoiceProfile['reference_text_status']): string {
+    switch (status) {
+      case 'ready':
+        return 'bg-green-100 text-green-700 dark:bg-green-500/15 dark:text-green-300';
+      case 'pending':
+        return 'bg-amber-100 text-amber-700 dark:bg-amber-500/15 dark:text-amber-300';
+      case 'failed':
+        return 'bg-red-100 text-red-700 dark:bg-red-500/15 dark:text-red-300';
+      case 'manual':
+        return 'bg-blue-100 text-blue-700 dark:bg-blue-500/15 dark:text-blue-300';
+      default:
+        return 'bg-gray-100 text-gray-600 dark:bg-gray-500/15 dark:text-gray-300';
+    }
+  }
+
+  function transcriptBadgeLabel(status: VoiceProfile['reference_text_status']): string {
+    switch (status) {
+      case 'ready':
+        return '✓ Transcribed';
+      case 'pending':
+        return 'Transcribing…';
+      case 'failed':
+        return '⚠ Needs transcript';
+      case 'manual':
+        return '✎ Edited';
+      default:
+        return status;
+    }
   }
 </script>
 
@@ -384,6 +547,90 @@
     </button>
   </div>
 
+  <!-- Just-created voice + transcript editor -->
+  {#if createdVoice}
+    <div class="card p-5 space-y-3">
+      <div class="flex items-center justify-between gap-2 flex-wrap">
+        <h2 class="section-title">Voice profile created</h2>
+        <span
+          class="text-xs px-2 py-0.5 rounded-full font-medium {transcriptBadgeClass(createdVoice.reference_text_status)}"
+        >
+          {transcriptBadgeLabel(createdVoice.reference_text_status)}
+        </span>
+      </div>
+
+      <p class="text-sm text-gray-600 dark:text-gray-400">
+        <span class="font-medium text-gray-800 dark:text-gray-200">{createdVoice.name}</span>
+        &middot; <span class="font-mono text-xs">{createdVoice.model_id}</span>
+      </p>
+
+      {#if createdVoice.reference_text_status === 'pending'}
+        <div class="flex items-center gap-2 text-sm text-gray-500 dark:text-gray-400" aria-live="polite">
+          <div class="spinner-sm"></div>
+          <span>Transcribing reference…</span>
+        </div>
+      {:else}
+        {#if createdVoice.reference_text_status === 'failed'}
+          <ErrorBanner
+            message="We couldn't auto-transcribe — please type what's spoken in the reference audio."
+            onDismiss={() => {}}
+          />
+        {/if}
+
+        <div>
+          <div class="flex items-center justify-between gap-2 flex-wrap">
+            <label class="label" for="reference-text-{createdVoice.id}">
+              Reference transcript (auto-detected)
+              {#if createdVoice.reference_text_status === 'manual'}
+                <span class="label-hint">— Manually entered</span>
+              {/if}
+            </label>
+            {#if transcriptSaving}
+              <span class="text-xs text-gray-400 dark:text-gray-500">Saving…</span>
+            {/if}
+          </div>
+          <textarea
+            id="reference-text-{createdVoice.id}"
+            class="input resize-none"
+            rows={4}
+            maxlength={4000}
+            value={transcriptDraft}
+            oninput={handleTranscriptInput}
+            aria-describedby="ref-text-hint-{createdVoice.id}"
+            aria-invalid={createdVoice.reference_text_status === 'failed' || !!transcriptError}
+            placeholder={createdVoice.reference_text_status === 'failed'
+              ? 'Type what is spoken in the reference audio'
+              : 'Auto-detected transcript will appear here'}
+          ></textarea>
+          <p id="ref-text-hint-{createdVoice.id}" class="text-xs text-gray-500 dark:text-gray-400 mt-1">
+            We transcribed your reference audio automatically. Edit if you spot errors. Detected language:
+            <code class="font-mono">{createdVoice.reference_language ?? '?'}</code>
+          </p>
+          {#if transcriptError}
+            <p class="text-xs text-red-500 dark:text-red-400 mt-1" role="alert">{transcriptError}</p>
+          {/if}
+        </div>
+
+        <div class="flex flex-wrap gap-2">
+          <button
+            type="button"
+            class="btn-secondary text-xs px-3 py-1.5"
+            onclick={handleRetranscribe}
+          >
+            Re-transcribe
+          </button>
+          <button
+            type="button"
+            class="btn-secondary text-xs px-3 py-1.5"
+            onclick={() => (createdVoice = null)}
+          >
+            Done
+          </button>
+        </div>
+      {/if}
+    </div>
+  {/if}
+
   <!-- Saved voices -->
   <div class="card p-5 space-y-4">
     <div class="flex items-center justify-between">
@@ -492,6 +739,12 @@
                   >✏</button>
                 {/if}
                 <span class="badge-available">{voice.model_id}</span>
+                <span
+                  class="text-xs px-2 py-0.5 rounded-full font-medium {transcriptBadgeClass(voice.reference_text_status)}"
+                  title="Transcript status"
+                >
+                  {transcriptBadgeLabel(voice.reference_text_status)}
+                </span>
               </div>
               <p class="text-xs text-gray-400 mt-0.5">{formatDate(voice.created_at)}</p>
 

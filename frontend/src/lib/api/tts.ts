@@ -35,6 +35,7 @@ export interface TTSJob {
   completed_at: string | null;
   batch_id?: string;
   celery_task_id?: string;
+  speaker_similarity?: number | null;
 }
 
 export interface JobListResponse {

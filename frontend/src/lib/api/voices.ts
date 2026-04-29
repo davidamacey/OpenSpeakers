@@ -1,14 +1,20 @@
 import axiosInstance from '$lib/axios';
 
+export type ReferenceTextStatus = 'pending' | 'ready' | 'failed' | 'manual';
+
 export interface VoiceProfile {
   id: string;
   name: string;
   model_id: string;
   reference_audio_path: string;
   embedding_path: string | null;
-  metadata: Record<string, unknown> | null;
-  description?: string;
+  metadata?: Record<string, unknown> | null;
+  extra_info?: Record<string, unknown> | null;
+  description?: string | null;
   tags?: string[];
+  reference_text: string | null;
+  reference_text_status: ReferenceTextStatus;
+  reference_language: string | null;
   created_at: string;
 }
 
@@ -16,6 +22,8 @@ export interface VoiceProfileUpdate {
   name?: string;
   description?: string;
   tags?: string[];
+  reference_text?: string | null;
+  reference_language?: string | null;
 }
 
 export interface VoiceListResponse {
@@ -46,20 +54,42 @@ export async function getVoice(voiceId: string): Promise<VoiceProfile> {
 export async function createVoiceProfile(
   name: string,
   modelId: string,
-  referenceAudio: File
+  referenceAudio: File,
+  referenceText?: string
 ): Promise<VoiceProfile> {
   const form = new FormData();
   form.append('name', name);
   form.append('model_id', modelId);
   form.append('reference_audio', referenceAudio);
+  if (referenceText !== undefined && referenceText !== null && referenceText !== '') {
+    form.append('reference_text', referenceText);
+  }
   const res = await axiosInstance.post<VoiceProfile>('/voices', form, {
     headers: { 'Content-Type': 'multipart/form-data' },
   });
   return res.data;
 }
 
-export async function updateVoice(voiceId: string, update: VoiceProfileUpdate): Promise<VoiceProfile> {
+export async function updateVoice(
+  voiceId: string,
+  update: VoiceProfileUpdate
+): Promise<VoiceProfile> {
   const { data } = await axiosInstance.patch<VoiceProfile>(`/voices/${voiceId}`, update);
+  return data;
+}
+
+/** Convenience wrapper: PATCH the transcript only. Empty string clears it
+ *  (server resets status to "pending" and re-runs ASR). */
+export async function updateVoiceTranscript(
+  voiceId: string,
+  text: string
+): Promise<VoiceProfile> {
+  return updateVoice(voiceId, { reference_text: text });
+}
+
+/** Trigger a fresh ASR run for the profile. Server resets status to "pending". */
+export async function transcribeVoice(voiceId: string): Promise<VoiceProfile> {
+  const { data } = await axiosInstance.post<VoiceProfile>(`/voices/${voiceId}/transcribe`);
   return data;
 }
 
