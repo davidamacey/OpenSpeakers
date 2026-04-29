@@ -101,3 +101,23 @@ services:
     environment:
       - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
       - CUDA_VISIBLE_DEVICES=${GPU_DEVICE_ID:-0}
+
+  # ── Optional: worker-asr on GPU ──────────────────────────────────────────
+  # worker-asr is CPU-only by default. Uncomment the block below (and set
+  # WHISPER_DEVICE=cuda + WHISPER_COMPUTE_TYPE=int8_float16 in .env) to put
+  # faster-whisper on GPU 0. ~600 MB resident for the `small` model.
+  #
+  # worker-asr:
+  #   runtime: nvidia
+  #   deploy:
+  #     resources:
+  #       reservations:
+  #         devices:
+  #           - driver: nvidia
+  #             capabilities: [gpu]
+  #             device_ids: ['${GPU_DEVICE_ID:-0}']
+  #   environment:
+  #     - GPU_DEVICE_ID=${GPU_DEVICE_ID:-0}
+  #     - CUDA_VISIBLE_DEVICES=${GPU_DEVICE_ID:-0}
+  #     - WHISPER_DEVICE=cuda
+  #     - WHISPER_COMPUTE_TYPE=int8_float16

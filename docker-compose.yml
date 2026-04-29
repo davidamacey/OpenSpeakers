@@ -333,6 +333,58 @@ services:
       redis:
         condition: service_healthy
 
+  worker-asr:
+    container_name: open_speakers-worker-asr
+    restart: unless-stopped
+    env_file: .env
+    security_opt:
+      - no-new-privileges:true
+    # CPU-only by default — faster-whisper `base` model in ~80 MB int8 mode.
+    # No GPU reservation here; flip via the docker-compose.gpu.yml fragment
+    # if you want the model on GPU 0.
+    build:
+      context: ./backend
+      dockerfile: Dockerfile.worker-asr
+    image: open_speakers-worker-asr:latest
+    command: >
+      celery -A app.core.celery worker
+      --loglevel=info
+      -Q tts.asr
+      --pool=threads
+      --concurrency=1
+      --max-tasks-per-child=1000
+      --hostname asr-worker@%h
+      -E
+    volumes:
+      - ./backend:/app
+      - ./configs:/app/configs:ro
+      - ${MODEL_CACHE_DIR:-./model_cache}/huggingface:/home/appuser/.cache/huggingface
+      - ${AUDIO_OUTPUT_DIR:-./audio_output}:/app/audio_output
+    environment:
+      - POSTGRES_HOST=postgres
+      - POSTGRES_PORT=5432
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - AUDIO_OUTPUT_DIR=/app/audio_output
+      - HF_HOME=/home/appuser/.cache/huggingface
+      - HOME=/home/appuser
+      - PYTHONPATH=/app
+      # Whisper defaults — override in .env to switch to GPU mode.
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      - WHISPER_COMPUTE_TYPE=${WHISPER_COMPUTE_TYPE:-int8}
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.core.celery inspect ping -d asr-worker@$$HOSTNAME"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+
   frontend:
     container_name: open_speakers-frontend
     restart: always

@@ -13,7 +13,7 @@ celery_app = Celery(
     "open_speakers",
     broker=settings.CELERY_BROKER_URL,
     backend=settings.CELERY_RESULT_BACKEND,
-    include=["app.tasks.tts_tasks"],
+    include=["app.tasks.tts_tasks", "app.tasks.eval_tasks", "app.tasks.asr_tasks"],
 )
 
 celery_app.conf.update(
@@ -37,11 +37,19 @@ celery_app.conf.update(
         Queue("tts.orpheus"),
         Queue("tts.dia"),
         Queue("tts.f5-tts"),
+        # Reference-audio transcription (faster-whisper, worker-asr).
+        Queue("tts.asr"),
     ],
     # Default routes (overridden at dispatch time for model-specific routing)
     task_routes={
         "app.tasks.tts_tasks.generate_tts": {"queue": "tts"},
         "app.tasks.tts_tasks.clone_voice": {"queue": "tts"},
+        # Speaker-similarity scoring runs on worker-kokoro (the always-on
+        # container that ships with speechbrain installed).
+        "eval.compute_similarity": {"queue": "tts.kokoro"},
+        # Reference-audio auto-transcription runs on the dedicated worker-asr
+        # container (CPU by default; flip to GPU via WHISPER_DEVICE).
+        "asr.transcribe_reference": {"queue": "tts.asr"},
     },
     task_queues_max_priority=10,
     task_default_queue="tts",

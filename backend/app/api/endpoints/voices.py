@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import shutil
+import tempfile
 import uuid
 from pathlib import Path
 
@@ -14,10 +15,13 @@ from app.core.config import settings
 from app.core.database import get_db
 from app.db.models import VoiceProfile
 from app.schemas.voices import (
+    MAX_REFERENCE_TEXT_LEN,
     BuiltinVoice,
+    SimilarityTestResponse,
     VoiceListResponse,
     VoiceProfileResponse,
     VoiceProfileUpdate,
+    _normalise_reference_text,
 )
 from app.tasks.tts_tasks import clone_voice
 
@@ -61,12 +65,30 @@ async def create_voice_profile(
     name: str = Form(...),
     model_id: str = Form(...),
     reference_audio: UploadFile = File(...),
+    reference_text: str = Form(""),
     db: Session = Depends(get_db),
 ) -> VoiceProfileResponse:
     """Upload reference audio and create a voice profile.
 
-    The voice embedding is generated asynchronously via a Celery task.
+    The voice embedding is generated asynchronously via a Celery task. The
+    reference transcript is auto-detected by faster-whisper unless the caller
+    supplied ``reference_text`` (a power-user override that skips ASR).
     """
+    # Normalise / validate the optional manual transcript first so we fail
+    # fast before touching disk. The schema-level cap is enforced via
+    # ``_normalise_reference_text`` semantics.
+    if reference_text and len(reference_text) > MAX_REFERENCE_TEXT_LEN:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"reference_text too long ({len(reference_text)} chars; "
+                f"max {MAX_REFERENCE_TEXT_LEN})"
+            ),
+        )
+    try:
+        normalised_reference_text = _normalise_reference_text(reference_text)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
     # Validate file type — accept all common audio containers (ffmpeg handles decoding)
     ALLOWED_TYPES = {
         "audio/wav",
@@ -117,20 +139,39 @@ async def create_voice_profile(
             detail=f"Audio file too large: {size_mb:.1f} MB > {MAX_REFERENCE_AUDIO_MB} MB",
         )
 
-    # Create DB record
+    # Create DB record. If the user supplied a transcript, persist it as
+    # ``manual`` (and skip ASR entirely); otherwise mark it ``pending`` and
+    # dispatch the auto-transcribe task below.
+    if normalised_reference_text:
+        ref_text_value: str | None = normalised_reference_text
+        ref_text_status = "manual"
+    else:
+        ref_text_value = None
+        ref_text_status = "pending"
+
     profile = VoiceProfile(
         id=voice_id,
         name=name,
         model_id=model_id,
         reference_audio_path=str(ref_path),
+        reference_text=ref_text_value,
+        reference_text_status=ref_text_status,
     )
     db.add(profile)
     db.commit()
     db.refresh(profile)
 
-    # Dispatch embedding generation task (model-specific queue routing)
+    # Dispatch embedding generation task (model-specific queue routing).
     queue = QUEUE_MAP.get(model_id, "tts")
     clone_voice.apply_async(args=[str(profile.id)], queue=queue)
+
+    # Dispatch auto-transcription unless the user pre-filled the transcript.
+    # Sending args by name to keep the call site readable; the task lives in
+    # a separate worker container so we route via apply_async + queue.
+    if ref_text_status == "pending" and settings.AUTO_TRANSCRIBE_REFERENCES:
+        from app.tasks.asr_tasks import transcribe_reference
+
+        transcribe_reference.apply_async(args=[str(profile.id)], queue="tts.asr")
 
     return VoiceProfileResponse.model_validate(profile)
 
@@ -199,7 +240,13 @@ def update_voice_profile(
     update: VoiceProfileUpdate,
     db: Session = Depends(get_db),
 ) -> VoiceProfileResponse:
-    """Update name, description, or tags on a voice profile."""
+    """Update name, description, tags, or reference transcript on a voice profile.
+
+    Editing ``reference_text`` to a non-empty value flips the workflow status
+    to ``"manual"`` so a late-running ASR task can never overwrite the user's
+    edit. Clearing it (passing an empty string / ``None``) resets the status
+    to ``"pending"`` and re-dispatches the auto-transcribe task.
+    """
     profile = db.query(VoiceProfile).filter(VoiceProfile.id == voice_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found")
@@ -211,9 +258,97 @@ def update_voice_profile(
     if update.tags is not None:
         profile.tags = update.tags
 
+    # Track whether we need to (re-)dispatch ASR after the commit.
+    redispatch_asr = False
+    fields_set = update.model_fields_set
+    if "reference_text" in fields_set:
+        # ``_normalise_reference_text`` already turned empty/whitespace input
+        # into ``None`` during validation.
+        if update.reference_text is None:
+            profile.reference_text = None
+            profile.reference_text_status = "pending"
+            redispatch_asr = True
+        else:
+            profile.reference_text = update.reference_text
+            profile.reference_text_status = "manual"
+    if "reference_language" in fields_set and update.reference_language is not None:
+        profile.reference_language = update.reference_language
+
     db.commit()
     db.refresh(profile)
+
+    if redispatch_asr and settings.AUTO_TRANSCRIBE_REFERENCES:
+        from app.tasks.asr_tasks import transcribe_reference
+
+        transcribe_reference.apply_async(args=[str(profile.id)], queue="tts.asr")
+
     return VoiceProfileResponse.model_validate(profile)
+
+
+@router.post("/{voice_id}/transcribe", response_model=VoiceProfileResponse)
+def retranscribe_voice_profile(
+    voice_id: uuid.UUID,
+    db: Session = Depends(get_db),
+) -> VoiceProfileResponse:
+    """Re-run the auto-transcribe task for a voice profile.
+
+    Resets ``reference_text`` to ``None`` and ``reference_text_status`` to
+    ``"pending"`` before dispatching. Useful when the audio file changed or
+    the previous attempt failed.
+    """
+    profile = db.query(VoiceProfile).filter(VoiceProfile.id == voice_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found")
+
+    profile.reference_text = None
+    profile.reference_text_status = "pending"
+    db.commit()
+    db.refresh(profile)
+
+    from app.tasks.asr_tasks import transcribe_reference
+
+    transcribe_reference.apply_async(args=[str(profile.id)], queue="tts.asr")
+    return VoiceProfileResponse.model_validate(profile)
+
+
+@router.post("/{voice_id}/test", response_model=SimilarityTestResponse)
+async def test_voice_similarity(
+    voice_id: uuid.UUID,
+    audio: UploadFile = File(...),
+    db: Session = Depends(get_db),
+) -> SimilarityTestResponse:
+    """Compute speaker similarity between the profile's reference and an upload.
+
+    Convenience endpoint for debugging without going through the full TTS
+    flow. Delegates to ``app.eval.similarity.reference_similarity`` which is
+    expected to live in the ``worker-kokoro`` container (Phase 5). If
+    speechbrain isn't yet deployed the endpoint will surface a 503.
+    """
+    profile = db.query(VoiceProfile).filter(VoiceProfile.id == voice_id).first()
+    if not profile:
+        raise HTTPException(status_code=404, detail="Voice profile not found")
+
+    # Persist the uploaded clip to a temp file so the eval routine can open
+    # it via path (consistent with how it reads the cached reference).
+    suffix = Path(audio.filename or "test.wav").suffix.lower() or ".wav"
+    with tempfile.NamedTemporaryFile(prefix="voice_test_", suffix=suffix, delete=False) as tf:
+        shutil.copyfileobj(audio.file, tf)
+        tmp_path = Path(tf.name)
+
+    try:
+        try:
+            from app.eval.similarity import reference_similarity
+        except ImportError as exc:
+            raise HTTPException(
+                status_code=503,
+                detail="Speaker-similarity backend not available",
+            ) from exc
+
+        similarity = float(reference_similarity(profile.reference_audio_path, str(tmp_path)))
+    finally:
+        tmp_path.unlink(missing_ok=True)
+
+    return SimilarityTestResponse(similarity=similarity)
 
 
 @router.get("/{voice_id}/audio")

@@ -36,6 +36,25 @@ def _get_db():
     return SessionLocal()
 
 
+def _wait_for_transcript(profile_id, db, timeout_s: float = 5.0) -> None:
+    """Briefly poll the DB for ASR completion before generation kicks off.
+
+    The auto-transcribe pipeline normally finishes well before the user
+    submits a TTS job, but a short clip uploaded immediately followed by a
+    generate request can race the ASR task. We poll every 250 ms up to
+    ``timeout_s`` and return silently on timeout — downstream models still
+    have their no-transcript fallback paths.
+    """
+    deadline = time.monotonic() + max(0.0, timeout_s)
+    while time.monotonic() < deadline:
+        profile = db.query(VoiceProfile).filter(VoiceProfile.id == profile_id).first()
+        if profile is None:
+            return
+        if profile.reference_text_status != "pending":
+            return
+        time.sleep(0.25)
+
+
 def _pub(job_id: str, event: dict) -> None:
     """Fire-and-forget progress publish — never crashes the task on failure."""
     try:
@@ -103,19 +122,32 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
 
         # ── Step 1: Resolve voice ─────────────────────────────────────────────
         voice_id = job.voice_id
-        if job.voice_profile_id and not voice_id:
+        profile: VoiceProfile | None = None
+        if job.voice_profile_id:
             profile = db.query(VoiceProfile).filter(VoiceProfile.id == job.voice_profile_id).first()
-            if profile:
+            if profile and not voice_id:
                 voice_id = profile.embedding_path or profile.reference_audio_path
 
         params = job.parameters or {}
+        extra = dict(params.get("extra") or {})
+
+        # Inject the reference transcript so cloning models can pick it up via
+        # ``request.extra["ref_text"]``. If ASR is still in flight we wait
+        # briefly (5 s cap) for it to land, then refresh the profile. A
+        # caller-supplied ``ref_text`` always wins.
+        if profile and profile.reference_text_status == "pending":
+            _wait_for_transcript(profile.id, db, timeout_s=5.0)
+            db.refresh(profile)
+        if profile and profile.reference_text and "ref_text" not in extra:
+            extra["ref_text"] = profile.reference_text
+
         request = GenerateRequest(
             text=job.text,
             voice_id=voice_id,
             speed=params.get("speed", 1.0),
             pitch=params.get("pitch", 0.0),
             language=params.get("language", "en"),
-            extra=params.get("extra", {}),
+            extra=extra,
         )
 
         # ── Step 2: Load model ────────────────────────────────────────────────
@@ -251,6 +283,24 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         keep_alive = params.get("keep_alive")
         if keep_alive is not None:
             self.manager.set_keep_alive(job.model_id, keep_alive)
+
+        # Trigger speaker-similarity scoring for cloned-voice jobs. Routed to
+        # the always-on ``tts.kokoro`` queue (worker-kokoro carries the
+        # speechbrain ECAPA model per Phase 5). Failures here must never
+        # surface to the user — the TTS job already succeeded.
+        if job.status == JobStatus.COMPLETE and job.voice_profile_id and job.output_path:
+            try:
+                from app.tasks.eval_tasks import compute_similarity
+
+                compute_similarity.apply_async(
+                    args=[str(job.id)],
+                    queue="tts.kokoro",
+                )
+            except ImportError:
+                # eval_tasks not yet deployed (Phase 5) — silently skip.
+                logger.debug("eval_tasks not available; skipping similarity scoring")
+            except Exception:
+                logger.exception("Failed to dispatch similarity task for job %s", job_id)
 
         _pub(
             job_id,

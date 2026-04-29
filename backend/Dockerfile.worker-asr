@@ -1,0 +1,67 @@
+# open_speakers worker-asr — faster-whisper reference-audio transcription
+#
+# CPU-only by default — the `base` model loads in ~1 s and transcribes a
+# 10 s clip in a couple of seconds, with no GPU contention against the TTS
+# workers. To run on GPU 0 instead, set WHISPER_DEVICE=cuda and
+# WHISPER_COMPUTE_TYPE=int8_float16, and apply the GPU overlay fragment in
+# docker-compose.gpu.yml.
+
+FROM python:3.12-slim AS base
+
+ENV DEBIAN_FRONTEND=noninteractive \
+    PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1
+
+WORKDIR /app
+
+# System deps for audio decoding + Postgres client lib.
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        ffmpeg \
+        libsndfile1 \
+        libpq-dev \
+        gcc \
+        g++ \
+    && rm -rf /var/lib/apt/lists/*
+
+# Backend + ASR deps. faster-whisper (CTranslate2 backend) is the headline
+# package; everything else mirrors what the existing workers need to talk to
+# Postgres / Redis and decode audio.
+RUN pip install --no-cache-dir \
+        "faster-whisper>=1.0.0" \
+        "librosa>=0.10.0" \
+        "soundfile>=0.12.1" \
+        "numpy>=1.26.0" \
+        "sqlalchemy>=2.0.30" \
+        "psycopg2-binary>=2.9.9" \
+        "celery>=5.4.0" \
+        "redis[asyncio]>=5.0.0" \
+        "pydantic>=2.6.0" \
+        "pydantic-settings>=2.3.0" \
+        "python-dotenv>=1.0.0" \
+        "fastapi>=0.115.0"
+
+# Application code lives at /app to match the other workers.
+COPY . /app
+
+# Non-root runtime user. UID 1000 mirrors the other workers so bind mounts
+# from the host with the same UID stay writable.
+RUN groupadd -g 1000 appuser \
+    && useradd -m -u 1000 -g 1000 -s /bin/bash appuser \
+    && mkdir -p /app/audio_output /home/appuser/.cache \
+    && chown -R 1000:1000 /app/audio_output /home/appuser
+
+ENV HOME=/home/appuser \
+    HF_HOME=/home/appuser/.cache/huggingface \
+    PYTHONPATH=/app
+
+USER 1000
+
+# Default: dedicated ASR queue, single concurrency (Whisper isn't thread-safe
+# enough for multi-tenancy).
+CMD ["celery", "-A", "app.core.celery", "worker", \
+     "--loglevel=info", "-Q", "tts.asr", \
+     "--pool=threads", "--concurrency=1", \
+     "--max-tasks-per-child=1000", \
+     "--hostname", "asr-worker@%h", "-E"]

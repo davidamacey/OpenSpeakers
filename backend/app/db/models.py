@@ -65,6 +65,10 @@ class TTSJob(Base):
     output_path: Mapped[str | None] = mapped_column(String(512), nullable=True)
     duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     processing_time_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    # Cosine similarity in [-1, 1] between the cloned voice's reference audio
+    # and the generated output. Populated asynchronously after generation by
+    # the eval task; NULL for non-cloning jobs and legacy rows.
+    speaker_similarity: Mapped[float | None] = mapped_column(Float, nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )
@@ -89,6 +93,16 @@ class VoiceProfile(Base):
     extra_info: Mapped[dict | None] = mapped_column("metadata", JSON, nullable=True)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
     tags: Mapped[list] = mapped_column(JSON, default=list, nullable=False, server_default="[]")
+    # Reference transcript pipeline: ``reference_text`` is auto-populated by
+    # faster-whisper on upload (or supplied by the user as a manual override).
+    # ``reference_text_status`` surfaces ASR state to the UI:
+    # ``pending`` (queued/running), ``ready`` (auto-detected), ``failed``
+    # (ASR errored — UI prompts manual entry), ``manual`` (user typed/edited).
+    reference_text: Mapped[str | None] = mapped_column(Text, nullable=True)
+    reference_text_status: Mapped[str] = mapped_column(
+        String(16), nullable=False, server_default="pending"
+    )
+    reference_language: Mapped[str | None] = mapped_column(String(8), nullable=True)
     created_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), nullable=False
     )

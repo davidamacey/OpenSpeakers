@@ -64,6 +64,22 @@ class Settings(BaseSettings):
     QWEN3_TTS_MODEL_PATH: str = "Qwen/Qwen3-TTS"
     KOKORO_MODEL_PATH: str = "hexgrad/Kokoro-82M"
 
+    # Reference-audio transcription (faster-whisper, runs in worker-asr).
+    # Default model is the 140 MB ``base`` checkpoint — fast on CPU and
+    # accurate enough for a transcript the user can edit. ``small`` /
+    # ``medium`` / ``large-v3-turbo`` are valid drop-ins for higher accuracy.
+    WHISPER_MODEL: str = "base"
+    WHISPER_DEVICE: str = "cpu"
+    WHISPER_COMPUTE_TYPE: str = "int8"
+    # Master kill switch for the ASR pipeline. When ``False``, voice profile
+    # uploads no longer dispatch the auto-transcribe task and rely on manual
+    # entry only.
+    AUTO_TRANSCRIBE_REFERENCES: bool = True
+    # F5-TTS-specific opt-out: when ``False`` the F5 model will refuse to
+    # invoke its built-in Whisper fallback for missing transcripts (avoids a
+    # surprise 600 MB download in the worker container).
+    F5_TTS_AUTO_TRANSCRIBE: bool = True
+
     # CORS — comma-separated origins. The defaults cover the standard dev setup
     # (Vite on 5173, docker-compose mapping to 5200, and the docker network).
     CORS_ALLOW_ORIGINS: str = (
