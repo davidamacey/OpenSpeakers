@@ -54,6 +54,19 @@ class VoiceProfileResponse(BaseModel):
     reference_text_status: ReferenceTextStatus = "pending"
     reference_language: str | None = None
     created_at: datetime
+    avg_similarity: float | None = Field(
+        None,
+        description=(
+            "Mean speaker_similarity across all completed jobs that used this voice "
+            "profile. NULL when no scored jobs exist yet."
+        ),
+    )
+    similarity_count: int = Field(
+        0,
+        description=(
+            "Number of completed jobs with a non-null speaker_similarity for this profile."
+        ),
+    )
 
     model_config = {"from_attributes": True}
 

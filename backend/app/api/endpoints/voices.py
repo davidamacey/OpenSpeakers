@@ -9,11 +9,12 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, File, Form, HTTPException, UploadFile
 from fastapi.responses import FileResponse
+from sqlalchemy import func
 from sqlalchemy.orm import Session
 
 from app.core.config import settings
 from app.core.database import get_db
-from app.db.models import VoiceProfile
+from app.db.models import JobStatus, TTSJob, VoiceProfile
 from app.schemas.voices import (
     MAX_REFERENCE_TEXT_LEN,
     BuiltinVoice,
@@ -24,6 +25,53 @@ from app.schemas.voices import (
     _normalise_reference_text,
 )
 from app.tasks.tts_tasks import clone_voice
+
+
+def _attach_similarity_stats(
+    profiles: list[VoiceProfile], db: Session
+) -> list[VoiceProfileResponse]:
+    """Return ``VoiceProfileResponse`` objects with ``avg_similarity`` and
+    ``similarity_count`` populated via a single aggregate query.
+
+    A profile with no scored jobs reports ``avg_similarity=None`` and
+    ``similarity_count=0``.
+    """
+    if not profiles:
+        return []
+
+    profile_ids = [p.id for p in profiles]
+
+    rows = (
+        db.query(
+            TTSJob.voice_profile_id,
+            func.avg(TTSJob.speaker_similarity).label("avg_sim"),
+            func.count(TTSJob.id).label("count"),
+        )
+        .filter(
+            TTSJob.voice_profile_id.in_(profile_ids),
+            TTSJob.speaker_similarity.isnot(None),
+            TTSJob.status == JobStatus.COMPLETE,
+        )
+        .group_by(TTSJob.voice_profile_id)
+        .all()
+    )
+    stats: dict[uuid.UUID, tuple[float | None, int]] = {
+        row.voice_profile_id: (
+            float(row.avg_sim) if row.avg_sim is not None else None,
+            int(row.count),
+        )
+        for row in rows
+    }
+
+    out: list[VoiceProfileResponse] = []
+    for p in profiles:
+        avg_sim, count = stats.get(p.id, (None, 0))
+        resp = VoiceProfileResponse.model_validate(p)
+        resp.avg_similarity = avg_sim
+        resp.similarity_count = count
+        out.append(resp)
+    return out
+
 
 router = APIRouter(prefix="/voices", tags=["voices"])
 
@@ -54,10 +102,8 @@ def list_voices(
     if model_id:
         q = q.filter(VoiceProfile.model_id == model_id)
     profiles = q.order_by(VoiceProfile.created_at.desc()).all()
-    return VoiceListResponse(
-        voices=[VoiceProfileResponse.model_validate(p) for p in profiles],
-        total=len(profiles),
-    )
+    voices = _attach_similarity_stats(profiles, db)
+    return VoiceListResponse(voices=voices, total=len(voices))
 
 
 @router.post("", response_model=VoiceProfileResponse, status_code=201)
@@ -231,7 +277,7 @@ def get_voice_profile(voice_id: uuid.UUID, db: Session = Depends(get_db)) -> Voi
     profile = db.query(VoiceProfile).filter(VoiceProfile.id == voice_id).first()
     if not profile:
         raise HTTPException(status_code=404, detail="Voice profile not found")
-    return VoiceProfileResponse.model_validate(profile)
+    return _attach_similarity_stats([profile], db)[0]
 
 
 @router.patch("/{voice_id}", response_model=VoiceProfileResponse)

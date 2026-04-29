@@ -16,6 +16,13 @@ export interface VoiceProfile {
   reference_text_status: ReferenceTextStatus;
   reference_language: string | null;
   created_at: string;
+  /** Mean speaker_similarity across completed jobs that used this profile.
+   *  ``null`` when no scored jobs exist yet. */
+  avg_similarity: number | null;
+  /** Number of scored completed jobs contributing to ``avg_similarity``. */
+  similarity_count: number;
+  /** Optional duration of the reference audio in seconds. Backend may omit. */
+  reference_duration_seconds?: number | null;
 }
 
 export interface VoiceProfileUpdate {

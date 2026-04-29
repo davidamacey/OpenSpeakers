@@ -8,12 +8,17 @@
   import AudioPlayer from '$components/AudioPlayer.svelte';
   import JobProgress from '$components/JobProgress.svelte';
   import ErrorBanner from '$components/ErrorBanner.svelte';
+  import SimilarityScale from '$components/SimilarityScale.svelte';
+  import SimilarityHints from '$components/SimilarityHints.svelte';
+  import ReferenceAudioRef from '$components/ReferenceAudioRef.svelte';
+  import CompareAudio from '$components/CompareAudio.svelte';
   import { models, modelsLoading, modelsError, refreshModels } from '$stores/models';
   import { recentJobs, addOrUpdateJob } from '$stores/jobs';
   import { generateTTS, getAudioUrl, pollJob, cancelJob, type TTSJob } from '$api/tts';
   import {
     listBuiltinVoices,
     listVoices,
+    getVoiceAudioUrl,
     type BuiltinVoice,
     type VoiceProfile,
   } from '$api/voices';
@@ -407,12 +412,32 @@
                 <optgroup label="My cloned voices">
                   {#each clonedVoices as v}
                     <option value={v.id}>
-                      {v.name} {v.reference_text ? '— ✓ Transcript' : '— ⚠ No transcript'}
+                      {v.name} {v.reference_text ? '— ✓ Transcript' : '— ⚠ No transcript'}{v.avg_similarity != null ? ` — Avg match: ${v.avg_similarity.toFixed(2)}` : ''}
                     </option>
                   {/each}
                 </optgroup>
               {/if}
             </select>
+            <!-- Avg-match badge for the currently selected cloned voice -->
+            {#if selectedVoiceId}
+              {@const selV = clonedVoices.find((v) => v.id === selectedVoiceId)}
+              {#if selV && selV.avg_similarity != null}
+                {@const avg = selV.avg_similarity}
+                {@const tier =
+                  avg >= 0.5
+                    ? 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300'
+                    : avg >= 0.3
+                      ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
+                      : 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300'}
+                <span
+                  class="inline-flex items-center text-[11px] px-2 py-0.5 rounded-full font-medium mt-1 {tier}"
+                  title={`Mean similarity across ${selV.similarity_count} scored job${selV.similarity_count === 1 ? '' : 's'}`}
+                >
+                  Avg match: {avg.toFixed(2)}
+                  <span class="ml-1 opacity-70">({selV.similarity_count})</span>
+                </span>
+              {/if}
+            {/if}
             <!-- Transcript-state hint for the currently selected cloned voice -->
             {#if selectedVoiceId}
               {@const sel = clonedVoices.find((v) => v.id === selectedVoiceId)}
@@ -601,24 +626,34 @@
         <!-- Audio player (shown once complete) -->
         <AudioPlayer src={audioUrl} duration={audioDuration} autoplay={audioAutoplay} />
 
-        <!-- Speaker similarity badge (Phase 5) -->
-        {#if currentJob?.status === 'complete' && currentJob.speaker_similarity != null}
-          {@const score = currentJob.speaker_similarity}
-          {@const tier =
-            score >= 0.5
-              ? 'bg-green-100 text-green-800 dark:bg-green-500/15 dark:text-green-300'
-              : score >= 0.3
-                ? 'bg-amber-100 text-amber-800 dark:bg-amber-500/15 dark:text-amber-300'
-                : 'bg-red-100 text-red-800 dark:bg-red-500/15 dark:text-red-300'}
-          {@const tierLabel = score >= 0.5 ? 'good match' : score >= 0.3 ? 'fair match' : 'weak match'}
-          <div class="flex items-center gap-2">
-            <span
-              class="inline-flex items-center text-xs px-2 py-1 rounded-full font-medium {tier}"
-              title="Cosine similarity between the generated audio and the reference voice (range -1 to 1; ≥0.5 typically means same speaker)"
-              aria-label={`Voice match score ${score.toFixed(2)} out of 1.0 — ${tierLabel} to the reference voice`}
-            >
-              Voice match: {score.toFixed(2)}
-            </span>
+        <!-- Speaker similarity panel (Phase 5: scale + reference + compare + hints).
+             Only renders when this job used a cloned voice profile. -->
+        {#if currentJob?.status === 'complete' && currentJob.voice_profile_id && audioUrl}
+          {@const refProfile = clonedVoices.find((v) => v.id === currentJob?.voice_profile_id)}
+          <div
+            class="rounded-lg border border-gray-200 dark:border-gray-700
+                   bg-gray-50 dark:bg-[#18181b]/60 p-3 space-y-3"
+          >
+            <ReferenceAudioRef
+              voiceId={currentJob.voice_profile_id}
+              referenceText={refProfile?.reference_text ?? null}
+            />
+
+            {#if currentJob.speaker_similarity != null}
+              <SimilarityScale score={currentJob.speaker_similarity} />
+            {/if}
+
+            <CompareAudio
+              referenceUrl={getVoiceAudioUrl(currentJob.voice_profile_id)}
+              generatedUrl={audioUrl}
+            />
+
+            {#if currentJob.speaker_similarity != null}
+              <SimilarityHints
+                score={currentJob.speaker_similarity}
+                modelId={currentJob.model_id}
+              />
+            {/if}
           </div>
         {/if}
 
