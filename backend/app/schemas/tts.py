@@ -49,6 +49,15 @@ class JobResponse(BaseModel):
     completed_at: datetime | None
     batch_id: uuid.UUID | None = None
     celery_task_id: str | None = None
+    speaker_similarity: float | None = Field(
+        None,
+        description=(
+            "Cosine speaker-similarity score in [-1, 1] between the generated "
+            "audio and the voice profile's reference clip. NULL when no voice "
+            "profile was used or the eval task hasn't run yet. >=0.5 typically "
+            "indicates a same-speaker match."
+        ),
+    )
 
     model_config = {"from_attributes": True}
 

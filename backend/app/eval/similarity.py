@@ -16,6 +16,7 @@ The first call lazily downloads the model (~80 MB) into
 from __future__ import annotations
 
 import logging
+import os
 import threading
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
@@ -44,7 +45,12 @@ class SimilarityError(RuntimeError):
 
 
 def _savedir() -> str:
-    return str(Path(settings.MODEL_CACHE_DIR) / "speechbrain" / "spkrec-ecapa-voxceleb")
+    """Where speechbrain caches its weights. Uses AUDIO_OUTPUT_DIR rather than
+    MODEL_CACHE_DIR because AUDIO_OUTPUT_DIR is the volume reliably bind-mounted
+    across every worker container; MODEL_CACHE_DIR may be a host-only path."""
+    return str(
+        Path(settings.AUDIO_OUTPUT_DIR) / "_models" / "speechbrain" / "spkrec-ecapa-voxceleb"
+    )
 
 
 def _get_model() -> Any:
@@ -55,6 +61,18 @@ def _get_model() -> Any:
     with _model_lock:
         if _model is not None:
             return _model
+        # speechbrain 1.0 still imports torchaudio.list_audio_backends, which
+        # was removed in torchaudio 2.10. Provide a shim before the import so
+        # the lookup falls back to soundfile (the same workaround Fish Speech
+        # uses).
+        try:
+            import torchaudio
+
+            if not hasattr(torchaudio, "list_audio_backends"):
+                torchaudio.list_audio_backends = lambda: ["soundfile"]
+        except ImportError:  # pragma: no cover - speechbrain import will fail next
+            pass
+
         try:
             # Local import — speechbrain is heavy and only present in workers
             # that actually run similarity scoring (worker-kokoro per the plan).
@@ -68,11 +86,21 @@ def _get_model() -> Any:
         savedir = _savedir()
         Path(savedir).mkdir(parents=True, exist_ok=True)
         logger.info("Loading speechbrain ECAPA-TDNN from %s (savedir=%s)", _MODEL_SOURCE, savedir)
-        _model = EncoderClassifier.from_hparams(
-            source=_MODEL_SOURCE,
-            savedir=savedir,
-            run_opts={"device": "cpu"},
-        )
+
+        # Workers run with HF_HUB_OFFLINE=1 for production reproducibility, but
+        # the speechbrain weights aren't pre-baked into the image. Lift the
+        # restriction for the one-time download; subsequent loads hit the cache
+        # under savedir and don't need network access.
+        prev_offline = os.environ.pop("HF_HUB_OFFLINE", None)
+        try:
+            _model = EncoderClassifier.from_hparams(
+                source=_MODEL_SOURCE,
+                savedir=savedir,
+                run_opts={"device": "cpu"},
+            )
+        finally:
+            if prev_offline is not None:
+                os.environ["HF_HUB_OFFLINE"] = prev_offline
         return _model
 
 
