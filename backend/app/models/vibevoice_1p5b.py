@@ -108,7 +108,9 @@ class VibeVoice1p5BModel(TTSModelBase):
                 raise
 
         self._model.eval()
-        self._model.set_ddpm_inference_steps(num_steps=20)
+        # Upstream demo (vibevoice-community/demo/inference_from_file.py) uses
+        # 10 DDPM steps. Higher counts don't help quality and waste time.
+        self._model.set_ddpm_inference_steps(num_steps=10)
         self._loaded = True
         logger.info("VibeVoice 1.5B loaded (%.1f GB VRAM estimate)", self.vram_gb_estimate)
 
@@ -141,17 +143,29 @@ class VibeVoice1p5BModel(TTSModelBase):
         # Prepare voice samples for cloning if a voice profile is set
         voice_samples = self._load_voice_samples(request.voice_id)
 
-        # Build processor inputs (move tensors individually for robustness)
-        proc_kwargs: dict = {"text": text, "return_tensors": "pt"}
+        # Build processor inputs. Upstream demo wraps voice_samples in an outer
+        # list (batch dimension) and asks for an attention mask. Both matter:
+        # without padding+attention_mask the prefix is silently truncated for
+        # short voice clips and the speaker conditioning collapses.
+        proc_kwargs: dict = {
+            "text": [text],
+            "padding": True,
+            "return_tensors": "pt",
+            "return_attention_mask": True,
+        }
         if voice_samples:
-            proc_kwargs["voice_samples"] = voice_samples
+            proc_kwargs["voice_samples"] = [voice_samples]
         raw_inputs = self._processor(**proc_kwargs)
         inputs = {k: v.to(self._device) if hasattr(v, "to") else v for k, v in raw_inputs.items()}
 
-        # Read tunable params from extras (clamp to safe ranges)
-        cfg_scale = float(request.extra.get("cfg_scale", 3.0))
+        # Read tunable params from extras (clamp to safe ranges).
+        # Defaults match the upstream community demo
+        # (vibevoice-community/demo/inference_from_file.py): cfg_scale=1.3,
+        # ddpm_steps=10. Our previous defaults (3.0 / 20) destroyed speaker
+        # similarity — the model is calibrated for cfg ≈ 1.3.
+        cfg_scale = float(request.extra.get("cfg_scale", 1.3))
         cfg_scale = max(0.1, min(cfg_scale, 10.0))
-        ddpm_steps = int(request.extra.get("ddpm_steps", 20))
+        ddpm_steps = int(request.extra.get("ddpm_steps", 10))
         ddpm_steps = max(1, min(ddpm_steps, 50))
         self._model.set_ddpm_inference_steps(num_steps=ddpm_steps)
 
@@ -160,7 +174,10 @@ class VibeVoice1p5BModel(TTSModelBase):
                 **inputs,
                 tokenizer=self._processor.tokenizer,
                 cfg_scale=cfg_scale,
-                return_speech=True,
+                # Upstream uses do_sample=False (deterministic). Sampling
+                # introduces drift that hurts cloning consistency.
+                generation_config={"do_sample": False},
+                verbose=False,
             )
 
         if not output.speech_outputs or output.speech_outputs[0] is None:
