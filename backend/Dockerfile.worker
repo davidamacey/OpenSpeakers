@@ -71,6 +71,14 @@ RUN pip install --no-cache-dir --no-deps "qwen-tts>=0.1.1" && \
 RUN pip install --no-cache-dir --no-deps "parler-tts" && \
     pip install --no-cache-dir "sentencepiece"
 
+# ── Speaker-similarity scoring (Phase 5) ───────────────────────────────────
+# speechbrain ECAPA-TDNN runs on CPU inside worker-kokoro to score how close
+# generated cloned audio sounds to the reference. librosa is needed by the
+# shared reference-audio preprocessing helper.
+RUN pip install --no-cache-dir \
+    "speechbrain>=1.0.0" \
+    "librosa>=0.10.0"
+
 # ── Application code ───────────────────────────────────────────────────────
 # Copy OpenSpeakers backend code (overrides /app from base image)
 COPY . .
