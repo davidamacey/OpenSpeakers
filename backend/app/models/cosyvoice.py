@@ -118,9 +118,12 @@ class CosyVoice2Model(TTSModelBase):
         # Pre-clean prompt and write a cleaned WAV to disk. CosyVoice's frontend
         # internally calls load_wav(path, 24000) inside _extract_speech_feat, so
         # the prompt MUST be a path-like, not a tensor (passing a tensor here
-        # produces "Invalid file: tensor(...)"). The 16 kHz target is for our
-        # cleaning pass; CosyVoice resamples to 24 kHz internally.
-        prompt_wav_path = str(prepare_reference_to_file(ref_audio, 16000, max_seconds=30))
+        # produces "Invalid file: tensor(...)"). We clean at 24 kHz to match
+        # the highest internal target rate — cleaning at 16 kHz first (an old
+        # bug) silently band-limited the prompt to 8 kHz before the speech-feat
+        # extractor up-sampled it back to 24 kHz, destroying timbre. ECAPA
+        # cosine vs human ref jumped from 0.04 → 0.70 by raising this to 24 kHz.
+        prompt_wav_path = str(prepare_reference_to_file(ref_audio, 24000, max_seconds=30))
 
         all_audio = []
 
