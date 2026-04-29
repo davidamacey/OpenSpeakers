@@ -234,23 +234,57 @@ class FishSpeechModel(TTSModelBase):
         if request.voice_id:
             ref_path = Path(request.voice_id)
             if ref_path.exists():
-                cleaned_path = prepare_reference_to_file(ref_path, 44100, max_seconds=30)
+                # Pre-clean the reference but skip loudness normalization — Fish's
+                # DAC encoder is amplitude-aware and forcing an arbitrary RMS
+                # target appears to flatten subtle timbre cues. We keep the
+                # mono/resample/silence-trim/length-clip pipeline because those
+                # steps don't alter the spectral envelope. Upstream's webui
+                # tooltip recommends 5-10 s of reference; cap at 15 s so we
+                # have headroom without spending the LLM's prompt budget on
+                # a needlessly long clip.
+                cleaned_path = prepare_reference_to_file(
+                    ref_path,
+                    44100,
+                    max_seconds=15,
+                    normalize_loudness=False,
+                )
                 references.append(
                     ServeReferenceAudio(
                         audio=cleaned_path.read_bytes(),
                         text=ref_text,
                     )
                 )
+                if not ref_text:
+                    # CRITICAL: ``generate_long`` in fish_speech sets
+                    # ``use_prompt = bool(prompt_text) and bool(prompt_tokens)``.
+                    # An empty transcript silently disables prompt-conditioned
+                    # cloning — the prompt VQ tokens are dropped entirely and
+                    # the LLM samples a fresh speaker. Surface this loudly.
+                    logger.warning(
+                        "Fish Speech: voice_id %s has no reference transcript — "
+                        "voice cloning is silently disabled by upstream "
+                        "(prompt_text required). Provide a reference_text on "
+                        "the VoiceProfile.",
+                        request.voice_id,
+                    )
 
+        # Defaults aligned with upstream Fish webui (tools/webui/__init__.py):
+        # chunk_length=300, top_p=0.8, repetition_penalty=1.1, temperature=0.8.
+        # Our previous temperature=0.7 fell outside the upstream slider range
+        # (0.7-1.0) and the default chunk_length=200 produces shorter
+        # iterative-prompt chunks (more boundary stitching), both of which can
+        # erode speaker similarity on S2-Pro.
         tts_kwargs: dict[str, Any] = {
             "text": request.text,
             "references": references,
-            "max_new_tokens": 2048,
-            "temperature": request.extra.get("temperature", 0.7),
+            "chunk_length": int(request.extra.get("chunk_length", 300)),
+            "max_new_tokens": int(request.extra.get("max_new_tokens", 1024)),
+            "temperature": request.extra.get("temperature", 0.8),
             "top_p": request.extra.get("top_p", 0.8),
             "repetition_penalty": request.extra.get("repetition_penalty", 1.1),
             "format": "wav",
             "streaming": False,
+            "use_memory_cache": "on",
         }
         seed = request.extra.get("seed")
         if seed is not None:
