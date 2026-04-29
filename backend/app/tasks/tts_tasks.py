@@ -125,11 +125,18 @@ def generate_tts(self: TTSTask, job_id: str) -> dict:
         t_start = time.monotonic()
 
         # ── Step 1: Resolve voice ─────────────────────────────────────────────
+        # Each model expects ``request.voice_id`` to be either a built-in slug
+        # (e.g. Kokoro's ``af_bella``) or a path to a reference clip on disk.
+        # When the user submits a job with a VoiceProfile UUID, the API stores
+        # that UUID in both ``job.voice_id`` *and* ``job.voice_profile_id`` —
+        # we must rewrite ``voice_id`` to the actual audio path here, otherwise
+        # the model sees a UUID string, ``Path(voice_id).exists()`` returns
+        # False, and cloning silently falls back to the model's default voice.
         voice_id = job.voice_id
         profile: VoiceProfile | None = None
         if job.voice_profile_id:
             profile = db.query(VoiceProfile).filter(VoiceProfile.id == job.voice_profile_id).first()
-            if profile and not voice_id:
+            if profile:
                 voice_id = profile.embedding_path or profile.reference_audio_path
 
         params = job.parameters or {}
