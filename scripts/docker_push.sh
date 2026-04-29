@@ -59,11 +59,10 @@ filter() {
   return 1
 }
 
-# Verify Docker Hub auth is present before doing anything.
-if ! docker info 2>/dev/null | grep -q "Username:"; then
-  echo "ERR: not logged into Docker Hub. Run 'docker login' first." >&2
-  exit 3
-fi
+# `docker info`'s "Username:" line is only set by an interactive `docker login`.
+# Stored auth tokens in ~/.docker/config.json work for pushes without it, so we
+# skip the precheck and let the first push surface a real "denied" error if
+# auth is missing.
 
 echo "Docker Hub namespace: $HUB"
 echo "Version tag:          $VERSION"
